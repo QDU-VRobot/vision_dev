@@ -1,0 +1,46 @@
+# ============================================================
+# rm_rune_detector 参数配置文件
+# ============================================================
+rune_detector_node:
+  ros__parameters:
+    # ==================== 基础参数 ====================
+    detect_color: 0          # 0=RED, 1=BLUE
+    color_threshold: 100     # 颜色通道差值二值化阈值
+    debug: true              # 是否发布调试图像和RViz Marker
+
+    # ==================== 坐标系参数 ====================
+    # 根据 rm_gimbal.urdf.xacro 设置:
+    #   gimbal_odom -> yaw_link -> pitch_link -> camera_link -> camera_optical_frame
+    target_frame: "gimbal_odom"             # 惯性参考系 (URDF根坐标系)
+    source_frame: "pitch_link"              # 云台末端坐标系 (俯仰轴输出)
+    camera_frame: "camera_optical_frame"    # 相机光学坐标系
+
+    # ==================== 检测器参数 ====================
+    detector:
+      min_contour_area: 20.0               # 最小轮廓面积
+      max_contour_area: 20000.0            # 最大轮廓面积
+      big_active_fan_area: 1000.0          # 判断为已激活扇叶的面积阈值
+      min_center_accuracy: 0.80            # 神符中心的最小识别准确率
+      max_distance_ratio: 1.5              # 距离神符中心的最远距离比值
+      max_match_deviation_ratio: 0.2       # 组合体与追踪器最大匹配偏差比例
+      enable_center_force_construct: true   # 是否启用神符中心强制构造
+      center_force_construct_ratio: 0.2    # 强制构造窗口的范围比例
+
+    # ==================== 序列组参数 ====================
+    group:
+      max_vanish_number: 5                 # 最大掉帧数
+      max_distance: 12000.0                # 最大距离 (mm, 相机坐标系)
+      min_distance: 3000.0                 # 最小距离 (mm, 相机坐标系)
+      max_x_deviation: 1500.0              # 帧间最大X偏差 (mm)
+      max_y_deviation: 1500.0              # 帧间最大Y偏差 (mm)
+      max_z_deviation: 1500.0              # 帧间最大Z偏差 (mm)
+      max_yaw_deviation: 15.0              # 帧间最大yaw偏差 (deg)
+      max_pitch_deviation: 15.0            # 帧间最大pitch偏差 (deg)
+      max_roll_deviation: 15.0             # 帧间最大roll偏差 (deg)
+      enable_extreme_value_filter: true    # 是否启用极端值滤波
+      raw_datas_size: 500                  # 角度原始数据队列长度
+
+    # ==================== 物理尺寸参数 (mm) ====================
+    rune:
+      center_translation_z: -165.44        # 能量机关中心相对于靶心平面的Z偏移
+      target_translation_y: -700.0         # 靶心中心相对于旋转中心的Y偏移

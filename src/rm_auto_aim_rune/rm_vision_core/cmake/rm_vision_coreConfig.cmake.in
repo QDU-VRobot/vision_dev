@@ -1,0 +1,35 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(OpenCV REQUIRED)
+
+# 导入目标
+if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
+  include("${CMAKE_CURRENT_LIST_DIR}/@PROJECT_NAME@Targets.cmake")
+endif()
+
+# 设置配置文件路径变量（供用户使用）
+set(@PROJECT_NAME@_CONFIG_DIR "${@PROJECT_NAME@_DIR}/../../config")
+
+# 提供聚合库（推荐使用）
+set(@PROJECT_NAME@_LIBRARIES @PROJECT_NAME@::@PROJECT_NAME@)
+
+# 如果需要访问单独模块
+set(@PROJECT_NAME@_MODULES
+  @PROJECT_NAME@::@PROJECT_NAME@_core
+  @PROJECT_NAME@::@PROJECT_NAME@_camera
+  @PROJECT_NAME@::@PROJECT_NAME@_contour_proc
+  @PROJECT_NAME@::@PROJECT_NAME@_dataio
+  @PROJECT_NAME@::@PROJECT_NAME@_math
+  @PROJECT_NAME@::@PROJECT_NAME@_detector
+  @PROJECT_NAME@::@PROJECT_NAME@_feature
+)
+
+check_required_components(@PROJECT_NAME@)
+
+# 输出提示信息
+if(NOT @PROJECT_NAME@_FIND_QUIETLY)
+  message(STATUS "Found @PROJECT_NAME@: ${@PROJECT_NAME@_DIR}")
+  message(STATUS "  - Config files: ${@PROJECT_NAME@_CONFIG_DIR}")
+  message(STATUS "  - Library: @PROJECT_NAME@::@PROJECT_NAME@")
+endif()
