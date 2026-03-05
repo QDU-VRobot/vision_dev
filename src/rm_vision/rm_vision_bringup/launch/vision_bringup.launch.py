@@ -31,6 +31,7 @@ def _build_after_checkout(context, *args, **kwargs):
         launch_params,
         robot_state_publisher,
         get_tracker_node,
+        get_rune_tracker_node,
     )
 
     robot_type = LaunchConfiguration("robot").perform(context)
@@ -44,7 +45,7 @@ def _build_after_checkout(context, *args, **kwargs):
             extra_arguments=[{"use_intra_process_comms": True}],
         )
 
-    def get_camera_detector_container(camera_node):
+    def get_camera_detector_container(camera_node, detector_node, log_key, log_name):
         return ComposableNodeContainer(
             name="camera_detector_container",
             namespace="",
@@ -52,20 +53,14 @@ def _build_after_checkout(context, *args, **kwargs):
             executable="component_container",
             composable_node_descriptions=[
                 camera_node,
-                ComposableNode(
-                    package="armor_detector",
-                    plugin="rm_auto_aim::ArmorDetectorNode",
-                    name="armor_detector",
-                    parameters=[node_params, {"robot_type": robot_type}],
-                    extra_arguments=[{"use_intra_process_comms": True}],
-                ),
+                detector_node,
             ],
             output="both",
             emulate_tty=True,
             ros_arguments=[
                 "--ros-args",
                 "--log-level",
-                "armor_detector:=" + launch_params["detector_log_level"],
+                log_name + ":=" + launch_params[log_key],
             ],
             on_exit=Shutdown(),
         )
@@ -76,11 +71,51 @@ def _build_after_checkout(context, *args, **kwargs):
     )
 
     if launch_params["camera"] == "hik":
-        cam_detector = get_camera_detector_container(hik_camera_node)
+        camera_node = hik_camera_node
     elif launch_params["camera"] == "mv":
-        cam_detector = get_camera_detector_container(mv_camera_node)
+        camera_node = mv_camera_node
     else:
         raise RuntimeError(f"Unknown camera type: {launch_params['camera']}")
+
+    from launch.actions import TimerAction
+
+    # 根据 mode 选择 detector/tracker pipeline
+    mode = LaunchConfiguration("mode").perform(context)
+
+    if mode == "rune":
+        detector_composable = ComposableNode(
+            package="rm_rune_detector",
+            plugin="rm_rune_detector::RuneDetectorNode",
+            name="rune_detector_node",
+            parameters=[node_params, {"robot_type": robot_type}],
+            extra_arguments=[{"use_intra_process_comms": True}],
+        )
+        cam_detector = get_camera_detector_container(
+            camera_node,
+            detector_composable,
+            "rune_detector_log_level",
+            "rune_detector_node",
+        )
+        delay_tracker_node = TimerAction(
+            period=2.0, actions=[get_rune_tracker_node(robot_type)]
+        )
+    else:
+        detector_composable = ComposableNode(
+            package="armor_detector",
+            plugin="rm_auto_aim::ArmorDetectorNode",
+            name="armor_detector",
+            parameters=[node_params, {"robot_type": robot_type}],
+            extra_arguments=[{"use_intra_process_comms": True}],
+        )
+        cam_detector = get_camera_detector_container(
+            camera_node,
+            detector_composable,
+            "detector_log_level",
+            "armor_detector",
+        )
+        delay_tracker_node = TimerAction(
+            period=2.0, actions=[get_tracker_node(robot_type)]
+        )
 
     serial_driver_node = Node(
         package="rm_serial_driver",
@@ -97,10 +132,7 @@ def _build_after_checkout(context, *args, **kwargs):
         ],
     )
 
-    from launch.actions import TimerAction
-
     delay_serial_node = TimerAction(period=1.5, actions=[serial_driver_node])
-    delay_tracker_node = TimerAction(period=2.0, actions=[get_tracker_node(robot_type)])
 
     return [
         robot_state_publisher,
@@ -139,6 +171,11 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("ws_root", default_value=os.getcwd()),
             DeclareLaunchArgument("robot", default_value="main"),
+            DeclareLaunchArgument(
+                "mode",
+                default_value="armor",
+                description="Pipeline mode: armor or rune",
+            ),
             checkout_robot,
             RegisterEventHandler(
                 OnProcessExit(

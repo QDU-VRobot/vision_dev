@@ -65,3 +65,18 @@ def get_tracker_node(robot_type="default"):
             "armor_tracker:=" + launch_params["tracker_log_level"],
         ],
     )
+
+
+def get_rune_tracker_node(robot_type="default"):
+    return Node(
+        package="rm_rune_tracker",
+        executable="rm_rune_tracker_node",
+        name="rune_tracker",
+        output="both",
+        emulate_tty=True,
+        parameters=[node_params, {"robot_type": robot_type}],
+        ros_arguments=[
+            "--log-level",
+            "rune_tracker:=" + launch_params["rune_tracker_log_level"],
+        ],
+    )
