@@ -161,6 +161,34 @@ class TestImageNode : public rclcpp::Node
           RCLCPP_INFO(get_logger(), "  距离: %.0f mm", cv::norm(p.tvec()));
         }
       }
+
+      // 滤波数据
+      PoseNode filtered_pose;
+      bool filter_valid = rune_group->getCamPnpDataFromFilter(filtered_pose);
+      RCLCPP_INFO(get_logger(), "  滤波有效: %s", filter_valid ? "YES" : "NO");
+      if (filter_valid)
+      {
+        RCLCPP_INFO(get_logger(), "  滤波中心位置 (mm): [%.0f, %.0f, %.0f]",
+                    filtered_pose.tvec()(0), filtered_pose.tvec()(1),
+                    filtered_pose.tvec()(2));
+        RCLCPP_INFO(get_logger(), "  滤波距离: %.0f mm", cv::norm(filtered_pose.tvec()));
+        // 滤波角速度
+        const auto& raw_datas = rune_group->getRawDatas();
+        const auto& history_ticks = rune_group->getHistoryTicks();
+        if (raw_datas.size() >= 2 && history_ticks.size() >= 2)
+        {
+          float current_filtered_angle = 0.0f;
+          rune_group->getCurrentRotateAngle(current_filtered_angle);
+          double d_angle = static_cast<double>(current_filtered_angle) - raw_datas[1];
+          double d_time = static_cast<double>(history_ticks[0] - history_ticks[1]) * 1e-9;
+          if (std::abs(d_time) > 1e-9)
+          {
+            double filtered_angular_velocity = (d_angle * M_PI / 180.0) / d_time;
+            RCLCPP_INFO(get_logger(), "  滤波角速度: %.2f rad/s",
+                        filtered_angular_velocity);
+          }
+        }
+      }
     }
 
     // 画信息覆盖

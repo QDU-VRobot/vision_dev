@@ -311,6 +311,37 @@ rm_rune_interfaces::msg::RuneTarget RuneDetectorNode::BuildRuneTargetMsg(
     }
   }
 
+  // 滤波数据处理
+  PoseNode filtered_pose;
+  msg.filter_valid = rune_group->getCamPnpDataFromFilter(filtered_pose);
+
+  if (msg.filter_valid)
+  {
+    // 使用滤波位姿
+    msg.filtered_center_pose = PoseNodeToRosPose(filtered_pose);
+
+    // 计算滤波角速度
+    if (raw_datas.size() >= 2 && history_ticks.size() >= 2)
+    {
+      float current_filtered_angle = 0.0f;
+      rune_group->getCurrentRotateAngle(current_filtered_angle);
+
+      // 使用滤波角度计算差分
+      double d_angle = static_cast<double>(current_filtered_angle) - raw_datas[1];
+      double d_time = static_cast<double>(history_ticks[0] - history_ticks[1]) * 1e-9;
+      if (std::abs(d_time) > 1e-9)
+      {
+        msg.filtered_angular_velocity = (d_angle * M_PI / 180.0) / d_time;
+      }
+    }
+  }
+  else
+  {
+    // 滤波无效，回退为原始数据
+    msg.filtered_center_pose = msg.center_pose;
+    msg.filtered_angular_velocity = msg.angular_velocity;
+  }
+
   // 各扇叶信息
   auto trackers = rune_group->getTrackers();
   for (const auto& tracker_node : trackers)

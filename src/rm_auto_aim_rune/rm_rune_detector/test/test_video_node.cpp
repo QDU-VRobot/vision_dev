@@ -186,6 +186,38 @@ class TestVideoNode : public rclcpp::Node
           // 调用原始绘制
           rune_group->drawFeature(debug_img);
 
+          // 滤波数据
+          PoseNode filtered_pose;
+          bool filter_valid = rune_group->getCamPnpDataFromFilter(filtered_pose);
+          if (filter_valid)
+          {
+            RCLCPP_INFO(get_logger(),
+                        "帧 %d: 滤波有效, 中心位置 [%.0f, %.0f, %.0f] mm, 距离 %.0f mm",
+                        frame_idx, filtered_pose.tvec()(0), filtered_pose.tvec()(1),
+                        filtered_pose.tvec()(2), cv::norm(filtered_pose.tvec()));
+            // 滤波角速度
+            const auto& raw_datas = rune_group->getRawDatas();
+            const auto& history_ticks = rune_group->getHistoryTicks();
+            if (raw_datas.size() >= 2 && history_ticks.size() >= 2)
+            {
+              float current_filtered_angle = 0.0f;
+              rune_group->getCurrentRotateAngle(current_filtered_angle);
+              double d_angle = static_cast<double>(current_filtered_angle) - raw_datas[1];
+              double d_time =
+                  static_cast<double>(history_ticks[0] - history_ticks[1]) * 1e-9;
+              if (std::abs(d_time) > 1e-9)
+              {
+                double filtered_angular_velocity = (d_angle * M_PI / 180.0) / d_time;
+                RCLCPP_INFO(get_logger(), "帧 %d: 滤波角速度 %.2f rad/s", frame_idx,
+                            filtered_angular_velocity);
+              }
+            }
+          }
+          else
+          {
+            RCLCPP_INFO(get_logger(), "帧 %d: 滤波无效，使用原始数据", frame_idx);
+          }
+
           // 额外: 为每个 tracker 绘制 3D 立方体
           for (auto& t_node : rune_group->getTrackers())
           {
