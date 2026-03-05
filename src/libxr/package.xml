@@ -4,7 +4,7 @@
   <name>libxr</name>
   <version>0.1.0</version>
   <description>ROS2 wrapper for LibXR</description>
-  <maintainer email="3132716198@qq.com">TODO</maintainer>
+  <maintainer email="3132716198@qq.com">BandieraRosa</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

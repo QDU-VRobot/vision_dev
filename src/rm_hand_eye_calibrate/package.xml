@@ -4,9 +4,8 @@
   <name>rm_hand_eye_calibrate</name>
   <version>0.1.0</version>
   <description>A template for ROS packages.</description>
-  <maintainer email="2972689924@qq.com">Kyle</maintainer>
+  <maintainer email="3132716198@qq.com">BandieraRosa</maintainer>
   <license>BSD</license>
-  <url type="website">https://github.com/MzKyle/CV_detector.git</url>
   <!-- buildtool_depend: dependencies of the build process -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 

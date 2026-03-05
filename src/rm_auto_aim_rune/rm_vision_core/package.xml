@@ -3,8 +3,8 @@
 <package format="3">
   <name>rm_vision_core</name>
   <version>1.0.0</version>
-  <description>RM Vision Core Library - Computer Vision Toolkit for RoboMaster</description>
-  <maintainer email="your_email@example.com">Your Name</maintainer>
+  <description>rm_vision_core ROS2 Wrapper</description>
+  <maintainer email="3132716198@qq.com">BandieraRosa</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
