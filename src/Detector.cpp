@@ -2,12 +2,14 @@
 #include "../include/serial_driver.hpp"
 #include <iostream>
 #include <opencv2/opencv.hpp>
+#include <chrono>
+#include <string>
 
 using namespace cv;
 using namespace std;
 
 int main() {
-  io::HikCamera Hik(0.5, 3); // 0.5,3  0.0001,0.01
+  io::HikCamera Hik(0.3, 10); // 0.5,3  0.0001,0.01
   Hik.continueCap(5);
 
   // while (true)
@@ -36,6 +38,8 @@ int main() {
   while (true) {
     io::HikCamera::ImageData frame;
     Hik.read(frame);
+
+    // auto start_time = chrono::high_resolution_clock::now();
 
     // ===== 颜色分割 =====
     if (useRGB) {
@@ -149,15 +153,17 @@ int main() {
       //     }
       driver.yaw_deflection =
           (ellipse_rect.center.x - 640) / 10; //修改除数以调整转向灵敏度
-      driver.gimbal_cmd.Publish(driver.yaw_deflection);
+      std::cout << "Yaw deflection: " << driver.yaw_deflection << std::endl;
+      driver.host_dart_gimbal_cmd.Publish(driver.yaw_deflection);
 
       if (ellipse_rect.center.x > 639 && ellipse_rect.center.x < 641) {
-        driver.fire_notify = 1;
+        driver.fire_notify_0 = 1;
       } else {
-        driver.fire_notify = 0;
+        driver.fire_notify_0 = 0;
       }
 
-      driver.launcher_cmd.Publish(driver.fire_notify);
+      std ::cout << "Fire notify: " << std::to_string(driver.fire_notify_0) << std::endl;
+      driver.fire_notify.Publish(driver.fire_notify_0);
       // 1280 1024
     }
 
@@ -168,14 +174,20 @@ int main() {
 
     namedWindow("Mask", WINDOW_NORMAL);
     resizeWindow("Mask", 640, 512);
-    moveWindow("Mask", 100, 600);
+    moveWindow("Mask", 1000, 0);
     imshow("Mask", mask);
 
     if (waitKey(30) == 27)
       break;
+    
+      auto end_time = chrono::high_resolution_clock::now();
+      auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+      cout << "Processing time: " << duration.count() << " ms" << endl;
   }
 
   // cap.release();
   destroyAllWindows();
   return 0;
 }
+ // if (waitKey(30) == 27)
+    //   break;

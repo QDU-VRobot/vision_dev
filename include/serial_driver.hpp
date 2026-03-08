@@ -18,7 +18,7 @@ static void XRobotMain(LibXR::HardwareContainer &hw) {
 
   static SharedTopicClient shared_topic_client(
       hw, appmgr, "uart_client", 81920, 256,
-      {{"gimbal_cmd"}, {"launcher_cmd"}});
+      {{"host_dart_gimbal_cmd"}, {"fire_notify"}});
 }
 
 /* RMSerialDriver类定义*/
@@ -30,11 +30,11 @@ public:
   double timestamp_offset{};
 
   float yaw_deflection;
-  uint8_t fire_notify = 0;
+  uint8_t fire_notify_0 = 0;
 
   /* LibXR Topic (用于发送到下位机) */
-  LibXR::Topic gimbal_cmd;
-  LibXR::Topic launcher_cmd;
+  LibXR::Topic host_dart_gimbal_cmd;
+  LibXR::Topic fire_notify;
 
   /* LibXR初始化相关成员变量 */
   std::unique_ptr<LibXR::RamFS> ramfs_;

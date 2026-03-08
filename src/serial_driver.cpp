@@ -25,8 +25,8 @@ RMSerialDriver::RMSerialDriver() {
   };
 
   // // 发送到下位机的话题
-  gimbal_cmd = LibXR::Topic::FindOrCreate<float>("gimbal_cmd");
-  launcher_cmd = LibXR::Topic::FindOrCreate<uint8_t>("launcher_cmd");
+  host_dart_gimbal_cmd = LibXR::Topic::FindOrCreate<float>("host_dart_gimbal_cmd");
+  fire_notify = LibXR::Topic::FindOrCreate<uint8_t>("fire_notify");
 
   XRobotMain(peripherals);
 }
