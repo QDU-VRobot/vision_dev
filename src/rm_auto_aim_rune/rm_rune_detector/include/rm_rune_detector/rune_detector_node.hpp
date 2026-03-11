@@ -85,6 +85,36 @@ class RuneDetectorNode : public rclcpp::Node
                                                    const std::string& text, float r,
                                                    float g, float b) const;
 
+  void binary(const cv::Mat& src, cv::Mat& bin, PixChannel target_color,
+              uint8_t threshold)
+  {
+    if (src.type() != CV_8UC3)
+    {
+      VC_THROW_ERROR("The image type of \"src\" is incorrect");
+    }
+    if (target_color != PixChannel::RED && target_color != PixChannel::BLUE)
+    {
+      VC_THROW_ERROR("The value of \"target_color\" is incorrect");
+    }
+    auto ch1 = target_color == PixChannel::RED ? PixChannel::RED : PixChannel::BLUE;
+    auto ch2 = target_color == PixChannel::RED ? PixChannel::BLUE : PixChannel::RED;
+    bin = cv::Mat::zeros(cv::Size(src.cols, src.rows), CV_8UC1);
+    parallel_for_(cv::Range(0, src.rows),
+                  [&](const cv::Range& range)
+                  {
+                    const uchar* data_src = nullptr;
+                    uchar* data_bin = nullptr;
+                    for (int row = range.start; row < range.end; ++row)
+                    {
+                      data_src = src.ptr<uchar>(row);
+                      data_bin = bin.ptr<uchar>(row);
+                      for (int col = 0; col < src.cols; ++col)
+                        if (data_src[3 * col + ch1] - data_src[3 * col + ch2] > threshold)
+                          data_bin[col] = 255;
+                    }
+                  });
+  }
+
   // ======================== 调试图像 ========================
   /// @brief 绘制完整的调试图像
   void DrawDebugImage(const cv::Mat& frame, const std_msgs::msg::Header& header,
@@ -110,6 +140,7 @@ class RuneDetectorNode : public rclcpp::Node
   rclcpp::Publisher<rm_rune_interfaces::msg::RuneTarget>::SharedPtr rune_pub_;
   image_transport::Publisher debug_img_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
+  image_transport::Publisher binary_img_pub_;
 
   // -- tf2 --
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;

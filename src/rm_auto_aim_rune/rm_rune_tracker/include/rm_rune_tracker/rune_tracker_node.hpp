@@ -48,7 +48,7 @@ class RuneTrackerNode : public rclcpp::Node
   std::unique_ptr<SolveTrajectory> trajectory_solver_;
 
   // Current bullet velocity
-  double current_velocity_{16.0};
+  double current_velocity_{20.0};
 };
 
 }  // namespace rm_auto_aim

@@ -60,6 +60,9 @@ RuneDetectorNode::RuneDetectorNode(const rclcpp::NodeOptions& options)
   rune_pub_ = this->create_publisher<rm_rune_interfaces::msg::RuneTarget>(
       "/rune/target", rclcpp::SensorDataQoS());
 
+  binary_img_pub_ =
+      image_transport::create_publisher(this, "/rune/binary_image");  // 二值化图 (调试)
+
   // RViz MarkerArray 发布
   marker_pub_ =
       this->create_publisher<visualization_msgs::msg::MarkerArray>("/rune/markers", 10);
@@ -177,6 +180,11 @@ void RuneDetectorNode::ImageCallback(
     rune_groups_.clear();
     return;
   }
+
+  cv::Mat bin;
+  binary(frame, bin, detect_color_ == 0 ? PixChannel::RED : PixChannel::BLUE,
+         color_threshold_);
+  binary_img_pub_.publish(cv_bridge::CvImage(img_msg->header, "mono8", bin).toImageMsg());
 
   rune_groups_ = output.getFeatureNodes();
 

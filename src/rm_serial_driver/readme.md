@@ -3,8 +3,6 @@
 ## 当前功能
 - 从电控获取
 
-  - 弹速`bullet_speed`，发布至`/current_velocity`
-
   - 云台姿态四元数`ahrs_quaternion`，发布至`serial/gimbal_joint_state`
 
     
