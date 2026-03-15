@@ -1,28 +1,14 @@
-
 #ifndef ARMOR_PROCESSOR__TRACKER_HPP_
 #define ARMOR_PROCESSOR__TRACKER_HPP_
 
-// ROS
-#include <angles/angles.h>
-
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-
-#include "armor_tracker/extended_kalman_filter.hpp"
 #include "auto_aim_interfaces/msg/armors.hpp"
+#include "auto_aim_interfaces/msg/target.hpp"
+#include <algorithm>
 
 namespace rm_auto_aim
 {
 
-using VoidBoolFunc = std::function<void(bool)>;
-
-// 装甲板数量 正常的4块 前哨站三块
-enum class ArmorsNum : uint8_t
-{
-  NORMAL_4 = 4,
-  OUTPOST_3 = 3
-};
-
-class Tracker  // 整车观测
+class Tracker
 {
  public:
   Tracker(double max_match_distance, double max_match_yaw_diff);
@@ -31,76 +17,33 @@ class Tracker  // 整车观测
   using Armor = auto_aim_interfaces::msg::Armor;
 
   void Init(const Armors::SharedPtr& armors_msg);
+  
+  // 核心 Update 函数声明
+  void Update(const Armors::SharedPtr& armors_msg, float cur_yaw, float cur_pitch, float yaw_err, float pitch_err);
 
-  void MatchSameIdArmor(const Armors::SharedPtr& armors_msg,
-                        Eigen::VectorXd& ekf_prediction, Armor& same_id_armor,
-                        int& same_id_armors_count, double& min_position_diff,
-                        double& yaw_diff);
-  void ClampTargetRadius();
-  void UpdateTrackerState(bool& matched);
-  void Update(const Armors::SharedPtr& armors_msg);
+  float get_final_yaw() const { return target_yaw_; }
+  float get_final_pitch() const { return target_pitch_; }
 
-  ExtendedKalmanFilter ekf;
-
-  int tracking_thres;
-  int lost_thres;
-
-  enum class State : uint8_t
-  {             // 四个状态
-    LOST,       // 丢失
-    DETECTING,  // 观测中
-    TRACKING,   // 跟踪中
-    TEMP_LOST,  // 临时丢失
+  enum State : uint8_t
+  {
+    LOST,
+    DETECTING,
+    TRACKING,
+    TEMP_LOST,
   } tracker_state;
 
-  // 装甲板情况
-  std::string tracked_id;        // 装甲板号
-  Armor tracked_armor;           // 被跟踪的装甲板
-  ArmorsNum tracked_armors_num;  // 被跟踪装甲版数
-  Armor last_tracked_armor{};    // 上一次被跟踪的装甲板
-  bool first_tracked = true;
-  bool is_outpost = false;
-  VoidBoolFunc switch_q_;
-
-  double info_position_diff;
-  double info_yaw_diff;
-
-  static double outpost_dz;
-  static double outpost_r;
-  static int outpost_idx;
-  static double outpost_cast_threshold;
-
-  Eigen::VectorXd measurement;  // 测量
-
-  Eigen::VectorXd target_state;  // 目标状态
-
-  Eigen::Vector3d predicted_position{};
-
-  //? 储存另一片装甲板信息
-  double dz, another_r;
+  Armor tracked_armor;
 
  private:
-  void InitEkf(const Armor& a);
+  // 控制状态成员变量
+  float target_yaw_ = 0.0f;
+  float target_pitch_ = 0.0f;
+  bool is_initialized_ = false;
 
-  void UpdateArmorsNum(const Armor& a);
-
-  void ResetState(double& yaw, const geometry_msgs::msg::Point& position);
-  void UpdateJumpedState(const geometry_msgs::msg::Point& position, double yaw);
-  void HandleArmorJump(const Armor& current_armor);
-
-  double OrientationToYaw(const geometry_msgs::msg::Quaternion& q);
-
-  Eigen::Vector3d GetArmorPositionFromState(const Eigen::VectorXd& x);
-
-  void SwitchEKFParams();
-
-  double max_match_distance_;
-  double max_match_yaw_diff_;
-
-  int detect_count_;
-  int lost_count_;
-
-  double last_yaw_;
+  // 控制参数
+  float kp_ = 1.2f;
+  float alpha_ = 0.8f;
+  float max_step_ = 0.06f;
 };
 
 }  // namespace rm_auto_aim

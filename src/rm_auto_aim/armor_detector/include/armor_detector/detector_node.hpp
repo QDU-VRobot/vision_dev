@@ -7,7 +7,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
-#include <std_msgs/msg/bool.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
 // STD
@@ -15,8 +14,6 @@
 #include <vector>
 
 #include "armor_detector/detector.hpp"
-#include "armor_detector/number_classifier.hpp"
-#include "armor_detector/pnp_solver.hpp"
 #include "auto_aim_interfaces/msg/armors.hpp"
 
 namespace rm_auto_aim
@@ -28,10 +25,10 @@ class ArmorDetectorNode : public rclcpp::Node
   ArmorDetectorNode(const rclcpp::NodeOptions& options);
 
  private:
-  void ImageCallback(const sensor_msgs::msg::Image::ConstSharedPtr& IMG_MSG);
+  void ImageCallback(sensor_msgs::msg::Image::ConstSharedPtr IMG_MSG);
 
   std::unique_ptr<Detector> InitDetector();
-  std::vector<Armor> DetectArmors(const sensor_msgs::msg::Image::ConstSharedPtr& img_msg);
+  std::vector<Armor> DetectArmors(sensor_msgs::msg::Image::ConstSharedPtr img_msg);
 
   void CreateDebugPublishers();
   void DestroyDebugPublishers();
@@ -55,10 +52,6 @@ class ArmorDetectorNode : public rclcpp::Node
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr cam_info_sub_;
   cv::Point2f cam_center_;
   std::shared_ptr<sensor_msgs::msg::CameraInfo> cam_info_;
-  std::unique_ptr<PnPSolver> pnp_solver_;
-
-  // Camera switch
-  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr camera_switch_sub_;
 
   // Image subscrpition
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
@@ -70,8 +63,8 @@ class ArmorDetectorNode : public rclcpp::Node
   rclcpp::Publisher<auto_aim_interfaces::msg::DebugLights>::SharedPtr lights_data_pub_;
   rclcpp::Publisher<auto_aim_interfaces::msg::DebugArmors>::SharedPtr armors_data_pub_;
   image_transport::Publisher binary_img_pub_;
-  image_transport::Publisher number_img_pub_;
   image_transport::Publisher result_img_pub_;
+
 };
 
 }  // namespace rm_auto_aim

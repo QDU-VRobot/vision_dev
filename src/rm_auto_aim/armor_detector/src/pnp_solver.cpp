@@ -1,71 +1,111 @@
-#include "armor_detector/pnp_solver.hpp"
+// #include "armor_detector/pnp_solver.hpp"
 
-#include <opencv2/calib3d.hpp>
-#include <vector>
+// #include <iostream>
+// #include <opencv2/calib3d.hpp>
+// #include <vector>
 
-namespace rm_auto_aim
-{
-PnPSolver::PnPSolver(const std::array<double, 9>& camera_matrix,
-                     const std::vector<double>& dist_coeffs)
-    : camera_matrix_(cv::Mat(3, 3, CV_64F)), dist_coeffs_(cv::Mat(1, 5, CV_64F))
-{
-  std::memcpy(camera_matrix_.data, camera_matrix.data(), 9 * sizeof(double));
-  size_t num_dist_coeffs = std::min(dist_coeffs.size(), static_cast<size_t>(5));
-  std::memcpy(dist_coeffs_.data, dist_coeffs.data(), num_dist_coeffs * sizeof(double));
-}
+// namespace rm_auto_aim
+// {
+// PnPSolver::PnPSolver(const std::array<double, 9>& camera_matrix,
+//                      const std::vector<double>& dist_coeffs)
+//     : camera_matrix_(cv::Mat(3, 3, CV_64F)), dist_coeffs_(cv::Mat(1, 5, CV_64F))
+// {
+//   std::memcpy(camera_matrix_.data, camera_matrix.data(), 9 * sizeof(double));
+//   size_t num_dist_coeffs = std::min(dist_coeffs.size(), static_cast<size_t>(5));
+//   std::memcpy(dist_coeffs_.data, dist_coeffs.data(), num_dist_coeffs * sizeof(double));
 
-bool PnPSolver::SolvePnP(const Armor& armor, cv::Mat& rvec, cv::Mat& tvec)
-{
-  std::array<cv::Point2f, 4> image_armor_points = {
-      armor.left_light.bottom, armor.left_light.top, armor.right_light.top,
-      armor.right_light.bottom};
+//   // Unit: m
+//   constexpr double SMALL_HALF_Y = SMALL_ARMOR_WIDTH / 2.0 / 1000.0;
+//   constexpr double SMALL_HALF_Z = SMALL_ARMOR_HEIGHT / 2.0 / 1000.0;
+//   // constexpr double LARGE_HALF_Y = LARGE_ARMOR_WIDTH / 2.0 / 1000.0;
+//   // constexpr double LARGE_HALF_Z = LARGE_ARMOR_HEIGHT / 2.0 / 1000.0;
 
-  // Solve pnp
-  auto object_points =
-      armor.type == ArmorType::SMALL ? SMALL_ARMOR_POINTS : LARGE_ARMOR_POINTS;
+//   // Start from bottom left in clockwise order
+//   // Model coordinate: x forward, y left, z up
+//   small_armor_points_.emplace_back(cv::Point3f(0, SMALL_HALF_Y, -SMALL_HALF_Z));
+//   small_armor_points_.emplace_back(cv::Point3f(0, SMALL_HALF_Y, SMALL_HALF_Z));
+//   small_armor_points_.emplace_back(cv::Point3f(0, -SMALL_HALF_Y, SMALL_HALF_Z));
+//   small_armor_points_.emplace_back(cv::Point3f(0, -SMALL_HALF_Y, -SMALL_HALF_Z));
 
-  std::vector<cv::Mat> rvecs, tvecs;
-  std::vector<double> re_projection_error;
-  int solutions = cv::solvePnPGeneric(object_points, image_armor_points, camera_matrix_,
-                                      dist_coeffs_, rvecs, tvecs, false,
-                                      cv::SOLVEPNP_IPPE,  // 使用 IPPE 算法获取多个解
-                                      cv::noArray(), cv::noArray(), re_projection_error);
+//   // large_armor_points_.emplace_back(cv::Point3f(0, LARGE_HALF_Y, -LARGE_HALF_Z));
+//   // large_armor_points_.emplace_back(cv::Point3f(0, LARGE_HALF_Y, LARGE_HALF_Z));
+//   // large_armor_points_.emplace_back(cv::Point3f(0, -LARGE_HALF_Y, LARGE_HALF_Z));
+//   // large_armor_points_.emplace_back(cv::Point3f(0, -LARGE_HALF_Y, -LARGE_HALF_Z));
+// }
 
-  if (solutions == 0)
-  {
-    return false;
-  }
+// bool PnPSolver::SolvePnP(const Armor& armor, cv::Mat& rvec, cv::Mat& tvec)
+// {
+//   std::vector<cv::Point2f> image_armor_points;
 
-  double z_data[3]{0, 0, 10};
-  cv::Mat z_vector(cv::Size(1, 3), CV_64FC1, z_data);
+//   // Fill in image points
+//   image_armor_points.emplace_back(armor.bottom_light.left);
+//   image_armor_points.emplace_back(armor.top_light.left);
+//   image_armor_points.emplace_back(armor.top_light.right);
+//   image_armor_points.emplace_back(armor.bottom_light.right);
 
-  cv::Mat r_0, r_1;
-  cv::Rodrigues(rvecs.front(), r_0);
-  cv::Rodrigues(rvecs.back(), r_1);
+//   // std::cout << "=== Image Points ===" << std::endl;
+//   // for (size_t i = 0; i < image_armor_points.size(); ++i)
+//   // {
+//   //   std::cout << "Point " << i << ": (" << image_armor_points[i].x << ", "
+//   //             << image_armor_points[i].y << ")" << std::endl;
+//   // }
 
-  cv::Mat z_camera_0 = r_0 * z_vector + tvecs.front();
-  cv::Mat z_camera_1 = r_1 * z_vector + tvecs.back();
+//   // Solve pnp
+//   auto object_points = small_armor_points_;
+//   std::vector<cv::Mat> rvecs, tvecs;
+//   std::vector<double> re_projection_error;
+//   int solutions = cv::solvePnPGeneric(object_points, image_armor_points, camera_matrix_,
+//                                       dist_coeffs_, rvecs, tvecs, false,
+//                                       cv::SOLVEPNP_IPPE,  // 使用 IPPE 算法获取多个解
+//                                       cv::noArray(), cv::noArray(), re_projection_error);
 
-  cv::Mat r, t;
-  if (z_camera_0.at<double>(2, 0) > 0)
-  {
-    rvec = rvecs.front();
-    tvec = tvecs.front();
-  }
-  else
-  {
-    rvec = rvecs.back();
-    tvec = tvecs.back();
-  }
-  return true;
-}
+//   // 打印所有解算结果
+//   // std::cout << "=== PnP Solutions ===" << std::endl;
+//   // std::cout << "Total solutions found: " << solutions << std::endl;
+//   // for (int i = 0; i < solutions; ++i)
+//   // {
+//   //   std::cout << "\nSolution " << i << ":" << std::endl;
+//   //   std::cout << "  Rotation Vector: " << rvecs[i].t() << std::endl;
+//   //   std::cout << "  Translation Vector: " << tvecs[i].t() << std::endl;
+//   //   std::cout << "  Reprojection Error: " << re_projection_error[i] << std::endl;
+//   // }
 
-float PnPSolver::CalculateDistanceToCenter(
-    const cv::Point2f& image_point)  // 计算给定图像点到图像中心的距离
-{
-  float cx = static_cast<float>(camera_matrix_.at<double>(0, 2));
-  float cy = static_cast<float>(camera_matrix_.at<double>(1, 2));
-  return static_cast<float>(cv::norm(image_point - cv::Point2f(cx, cy)));
-}
+//   if (solutions == 0)
+//   {
+//     return false;
+//   }
 
-}  // namespace rm_auto_aim
+//   double z_data[3]{0, 0, 10};
+//   cv::Mat z_vector(cv::Size(1, 3), CV_64FC1, z_data);
+
+//   cv::Mat r_0, r_1;
+//   cv::Rodrigues(rvecs.front(), r_0);
+//   cv::Rodrigues(rvecs.back(), r_1);
+
+//   cv::Mat z_camera_0 = r_0 * z_vector + tvecs.front();
+//   cv::Mat z_camera_1 = r_1 * z_vector + tvecs.back();
+
+//   cv::Mat r, t;
+//   if (tvecs.front().at<double>(2) > 0 && 
+//      (re_projection_error.front() < re_projection_error.back() * 1.5))
+//   {
+//     rvec = rvecs.front();
+//     tvec = tvecs.front();
+//   }
+//   else
+//   {
+//     rvec = rvecs.back();
+//     tvec = tvecs.back();
+//   }
+//   return true;
+// }
+
+// float PnPSolver::CalculateDistanceToCenter(
+//     const cv::Point2f& image_point)  // 计算给定图像点到图像中心的距离
+// {
+//   float cx = static_cast<float>(camera_matrix_.at<double>(0, 2));
+//   float cy = static_cast<float>(camera_matrix_.at<double>(1, 2));
+//   return static_cast<float>(cv::norm(image_point - cv::Point2f(cx, cy)));
+// }
+
+// }  // namespace rm_auto_aim

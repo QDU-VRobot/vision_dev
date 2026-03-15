@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "armor_detector/armor.hpp"
-#include "armor_detector/number_classifier.hpp"
+// #include "armor_detector/number_classifier.hpp"
 #include "auto_aim_interfaces/msg/debug_armors.hpp"
 #include "auto_aim_interfaces/msg/debug_lights.hpp"
 
@@ -33,8 +33,8 @@ class Detector
     // light pairs distance
     double min_small_center_distance;
     double max_small_center_distance;
-    double min_large_center_distance;
-    double max_large_center_distance;
+    // double min_large_center_distance;
+    // double max_large_center_distance;
     // horizontal angle
     double max_angle;
   };
@@ -49,7 +49,7 @@ class Detector
   std::vector<Armor> MatchLights(const std::vector<Light>& lights);
 
   // For debug usage
-  cv::Mat GetAllNumbersImage();
+  // cv::Mat GetAllNumbersImage();
   void DrawResults(cv::Mat& img);
 
   int binary_thres;
@@ -57,7 +57,7 @@ class Detector
   LightParams l;
   ArmorParams a;
 
-  std::unique_ptr<NumberClassifier> classifier;
+  // std::unique_ptr<NumberClassifier> classifier;
 
   // Debug msgs
   cv::Mat binary_img;

@@ -2,12 +2,12 @@ cmake_minimum_required(VERSION 3.10)
 project(armor_detector)
 
 ## Use C++14
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 ## By adding -Wall and -Werror, the compiler does not ignore warnings anymore,
 ## enforcing cleaner code.
-# add_definitions(-Wall -Werror)
+add_definitions(-Wall -Werror)
 
 ## Export compile commands for clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -50,13 +50,12 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   find_package(ament_cmake_gtest)
+  ament_add_gtest(test_node_startup test/test_node_startup.cpp)
+  target_link_libraries(test_node_startup ${PROJECT_NAME})
 
-  file(GLOB TEST_SOURCES test/*.cpp)
-  foreach(TEST_SOURCE ${TEST_SOURCES})
-    get_filename_component(TEST_NAME ${TEST_SOURCE} NAME_WE)  
-    ament_add_gtest(${TEST_NAME} ${TEST_SOURCE})
-    target_link_libraries(${TEST_NAME} ${PROJECT_NAME})
-  endforeach()
+  ament_add_gtest(test_number_cls test/test_number_cls.cpp)
+  target_link_libraries(test_number_cls ${PROJECT_NAME})
+
 endif()
 
 #############
@@ -67,3 +66,4 @@ ament_auto_package(
   INSTALL_TO_SHARE
   model
 )
+

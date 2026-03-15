@@ -32,8 +32,6 @@ RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions& options)
   ahrs_quaternion_topic_ =
       LibXR::Topic::FindOrCreate<LibXR::Quaternion<float>>("ahrs_quaternion");
 
-  lob_shot_topic_ = LibXR::Topic::FindOrCreate<uint8_t>("lob_shot");
-
   LibXR::Topic::Domain referee_domain = LibXR::Topic::Domain("referee");
   bullet_speed_topic_ =
       LibXR::Topic::FindOrCreate<float>("bullet_speed", &referee_domain);
@@ -53,12 +51,6 @@ RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions& options)
   velocity_pub_ =
       this->create_publisher<auto_aim_interfaces::msg::Velocity>("/current_velocity", 10);
 
-  // 吊射标志
-  if (is_hero_)
-  {
-    lob_shot_pub_ = this->create_publisher<std_msgs::msg::Bool>(
-        "/lob_shot_switch", rclcpp::QoS(1).reliable());
-  }
 
   // 打弹（t键打弹，g键停止）
   fire_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -91,9 +83,9 @@ RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions& options)
     LibXR::EulerAngle<float> gimbal = quat->ToEulerAngle();
     if (++self->ahrs_receive_cnt_ % self->ahrs_print_freq_ == 0)
     {
-      // RCLCPP_INFO(self->get_logger(),
-      //             "Current gimbal Euler angles: roll:%f, pitch:%f, yaw:%f",
-      //             gimbal.Roll(), gimbal.Pitch(), gimbal.Yaw());
+      RCLCPP_INFO(self->get_logger(),
+                  "Current gimbal Euler angles: roll:%f, pitch:%f, yaw:%f",
+                  gimbal.Roll(), gimbal.Pitch(), gimbal.Yaw());
       self->ahrs_receive_cnt_ = 0;
     }
     // ROS2发布云台关节状态
@@ -125,27 +117,6 @@ RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions& options)
   auto bullet_speed_cb = LibXR::Topic::Callback::Create(bullet_speed_cb_fun, this);
   bullet_speed_topic_.RegisterCallback(bullet_speed_cb);
 
-  // 吊射标志回调
-  if (is_hero_)
-  {
-    void (*lob_shot_cb_fun)(bool, RMSerialDriver* self, LibXR::RawData& data) =
-        [](bool, RMSerialDriver* self, LibXR::RawData& data)
-    {
-      auto val = *reinterpret_cast<uint8_t*>(data.addr_);
-      uint8_t prev = self->last_lob_val_;
-      self->last_lob_val_ = val;
-      if (prev == 0 && val != 0)
-      {
-        std_msgs::msg::Bool msg;
-        msg.data = true;
-        self->lob_shot_pub_->publish(msg);
-        RCLCPP_INFO(self->get_logger(),
-                    "Lob shot edge detected (0->1), published switch.");
-      }
-    };
-    auto lob_shot_cb = LibXR::Topic::Callback::Create(lob_shot_cb_fun, this);
-    lob_shot_topic_.RegisterCallback(lob_shot_cb);
-  }
 }
 
 RMSerialDriver::~RMSerialDriver() {}
@@ -159,6 +130,7 @@ void RMSerialDriver::SendCallBack(const auto_aim_interfaces::msg::Send::SharedPt
   target_euler.Roll() = 0.0f;
   fire_notify_ = msg->is_fire;
   target_euler_topic_.Publish(target_euler);
+//   RCLCPP_WARN(this->get_logger(), "current target euler: pitch=%f, yaw=%f", target_euler.Pitch(), target_euler.Yaw());
   fire_notify_topic_.Publish(fire_notify_);
 }
 

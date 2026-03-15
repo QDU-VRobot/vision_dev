@@ -5,76 +5,78 @@
 
 namespace rm_auto_aim
 {
-constexpr int RED = 0;
-constexpr int BLUE = 1;
+const int RED = 0;
+const int BLUE = 1;
 
 enum class ArmorType : uint8_t
 {
   SMALL,
-  LARGE,
   INVALID
 };
-constexpr std::array<std::string_view, 3> ARMOR_TYPE_STR = {"small", "large", "invalid"};
+const std::string ARMOR_TYPE_STR[2] = {"small", "invalid"};
+
+
 struct Light : public cv::RotatedRect
-{
+{ 
   Light() = default;
+
   explicit Light(const cv::RotatedRect& box)
-      : cv::RotatedRect(box),
-        tilt_angle(std::atan2(
-            std::abs(top.x - bottom.x),
-            std::abs(top.y -
-                     bottom.y)))  // Light继承自cv::RotatedRect，可以直接使用其成员函数
+      : cv::RotatedRect(box)   // 只初始化父类
   {
-    cv::Point2f p[4];  // 灯条四个点
-    box.points(p);     // rotatedrect的points函数可以获取四个点的坐标
+    cv::Point2f p[4];  
+    box.points(p);
+
     std::sort(p, p + 4,
-              [](const cv::Point2f& a, const cv::Point2f& b) { return a.y < b.y; });
-    top = (p[0] + p[1]) / 2;  // 灯条顶部和底部中心点
-    bottom = (p[2] + p[3]) / 2;
+              [](const cv::Point2f& a, const cv::Point2f& b) { return a.x < b.x; });
 
-    // 计算灯条的长度，即顶部中心点和底部中心点之间的欧几里得距离
-    length = cv::norm(top - bottom);
-    // 计算灯条的宽度，即排序后前两个顶点之间的欧几里得距离
-    width = cv::norm(p[0] - p[1]);
+    left  = (p[0] + p[1]) / 2;
+    right = (p[2] + p[3]) / 2;
 
-    // 在平面图像中，计算灯条相对于垂直方向的倾斜角度（弧度制）
+    length = cv::norm(left - right);
+    width  = cv::norm(p[0] - p[1]);
+
+    // 计算倾角（你原来的公式）
+    tilt_angle = std::atan2(
+        std::abs(left.y - right.y),
+        std::abs(left.x - right.x));
 
     tilt_angle = static_cast<float>(tilt_angle / CV_PI * 180);
   }
 
   int color;
-  cv::Point2f top, bottom;
+  cv::Point2f left, right;
   double length;
   double width;
   float tilt_angle;
 };
+
 
 struct Armor
 {
   Armor() = default;
   Armor(const Light& l1, const Light& l2)
   {
-    if (l1.center.x < l2.center.x)
+    if (l1.center.y < l2.center.y)
     {
-      left_light = l1, right_light = l2;
+      top_light = l1, bottom_light = l2;
     }
     else
     {
-      left_light = l2, right_light = l1;
+      top_light = l2, bottom_light = l1;
     }
-    center = (left_light.center + right_light.center) / 2;
+    center = (top_light.center + bottom_light.center) / 2;
   }
 
   // Light pairs part
-  Light left_light, right_light;
+  Light top_light, bottom_light;
   cv::Point2f center;
   ArmorType type;
 
   // Number part
-  cv::Mat number_img;
-  std::string number;
-  float confidence;
-  std::string classfication_result;
+  // cv::Mat number_img;
+  // std::string number;
+  // float confidence;
+  // std::string classification_result;
 };
 
 }  // namespace rm_auto_aim

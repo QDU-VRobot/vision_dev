@@ -28,7 +28,7 @@ static void XRobotMain(LibXR::HardwareContainer& hw)
   static ApplicationManager appmgr;
 
   static SharedTopic shared_topic(hw, appmgr, "uart_client", 81920, 256,
-                                  {{"ahrs_quaternion"}, {"lob_shot"}});
+                                  {{"ahrs_quaternion"}});
 
   static SharedTopicClient shared_topic_client(
       hw, appmgr, "uart_client", 81920, 256,
@@ -55,7 +55,6 @@ class RMSerialDriver : public rclcpp::Node
       joint_state_pub_;  // 云台关节状态发布者
   rclcpp::Publisher<auto_aim_interfaces::msg::Velocity>::SharedPtr
       velocity_pub_;                                                // 弹速发布者
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr lob_shot_pub_;  // 吊射标志发布者
 
   /* ROS2订阅者 */
   rclcpp::Subscription<auto_aim_interfaces::msg::Send>::SharedPtr send_sub_;
