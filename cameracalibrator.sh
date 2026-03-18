@@ -3,13 +3,13 @@
 delay_time=3
 
 # 开第一个终端运行相机
-gnome-terminal -- bash -c "cd /home/find/code/vision_/vision_dev/ && source install/setup.bash && ros2 launch hik_camera hik_camera.launch.py"
+gnome-terminal -- bash -c "cd /home/alis/codes/vision_dev/ && source install/setup.bash && ros2 launch hik_camera hik_camera.launch.py"
 
 # 等待2秒让相机启动
 sleep 2
 
 # 开第二个终端运行标定
-gnome-terminal -- bash -c "cd /home/find/code/vision_/vision_dev/ && source install/setup.bash && ros2 run camera_calibration cameracalibrator --size 11x8 --square 0.02 image:=/image_raw camera:=/hik_camera; exec bash"
+gnome-terminal -- bash -c "cd /home/alis/codes/vision_dev/ && source install/setup.bash && ros2 run camera_calibration cameracalibrator --size 11x8 --square 0.02 image:=/image_raw camera:=/hik_camera; exec bash"
 
 echo "两个终端已打开！"
 

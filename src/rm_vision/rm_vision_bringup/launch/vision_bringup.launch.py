@@ -82,30 +82,13 @@ def _build_after_checkout(context, *args, **kwargs):
     else:
         raise RuntimeError(f"Unknown camera type: {launch_params['camera']}")
 
-    serial_driver_node = Node(
-        package="rm_serial_driver",
-        executable="rm_serial_driver_node",
-        name="serial_driver",
-        output="both",
-        emulate_tty=True,
-        parameters=[node_params, {"robot_type": robot_type}],
-        on_exit=Shutdown(),
-        ros_arguments=[
-            "--ros-args",
-            "--log-level",
-            "serial_driver:=" + launch_params["serial_log_level"],
-        ],
-    )
-
     from launch.actions import TimerAction
 
-    delay_serial_node = TimerAction(period=1.5, actions=[serial_driver_node])
     delay_tracker_node = TimerAction(period=2.0, actions=[get_tracker_node(robot_type)])
 
     return [
         robot_state_publisher,
         cam_detector,
-        delay_serial_node,
         delay_tracker_node,
     ]
 

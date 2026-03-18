@@ -449,8 +449,8 @@ void HikCameraNode::ProtectRunning()
       break;
     }
 
-    RCLCPP_INFO(this->get_logger(), "Camera stopped, attempting to restart...");
-    this->CaptureStop();
+    // RCLCPP_INFO(this->get_logger(), "Camera stopped, attempting to restart...");
+    // this->CaptureStop();
     // 简单延时防止频繁重启
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     this->CaptureInit();
