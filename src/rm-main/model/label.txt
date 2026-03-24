@@ -1,0 +1,7 @@
+base
+hero
+2
+3
+4
+guard
+outpost
