@@ -1,6 +1,9 @@
 #ifndef ARMOR_DETECTOR__DETECTOR_NODE_HPP_
 #define ARMOR_DETECTOR__DETECTOR_NODE_HPP_
 
+// Eigen
+#include <Eigen/Eigen>
+
 // ROS
 #include <image_transport/publisher.hpp>
 #include <image_transport/subscriber_filter.hpp>
@@ -8,16 +11,21 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <tf2_ros/buffer.hpp>
+#include <tf2_ros/transform_listener.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
 // STD
 #include <memory>
 #include <vector>
 
+#include "armor_detector/ba_solver.hpp"
 #include "armor_detector/detector.hpp"
 #include "armor_detector/light_corner_corrector.hpp"
 #include "armor_detector/number_classifier.hpp"
 #include "armor_detector/pnp_solver.hpp"
+
+// Interfaces
 #include "auto_aim_interfaces/msg/armors.hpp"
 
 namespace rm_auto_aim
@@ -34,6 +42,8 @@ class ArmorDetectorNode : public rclcpp::Node
   std::unique_ptr<Detector> InitDetector();
   std::unique_ptr<LightCornerCorrector> InitLightCornerCorrector();
   std::unique_ptr<PnPSolver> InitPnPSolver();
+  std::unique_ptr<BaSolver> InitBaSolver();
+  void InitTransformListener();
 
   std::vector<Armor> DetectArmors(const sensor_msgs::msg::Image::ConstSharedPtr& img_msg);
 
@@ -45,6 +55,9 @@ class ArmorDetectorNode : public rclcpp::Node
   // Armor Detector
   std::unique_ptr<Detector> detector_;
   std::unique_ptr<LightCornerCorrector> corner_corrector_;
+  std::unique_ptr<PnPSolver> pnp_solver_;
+  std::unique_ptr<BaSolver> ba_solver_;
+
   // Detected armors publisher
   auto_aim_interfaces::msg::Armors armors_msg_;
   rclcpp::Publisher<auto_aim_interfaces::msg::Armors>::SharedPtr armors_pub_;
@@ -59,7 +72,6 @@ class ArmorDetectorNode : public rclcpp::Node
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr cam_info_sub_;
   cv::Point2f cam_center_;
   std::shared_ptr<sensor_msgs::msg::CameraInfo> cam_info_;
-  std::unique_ptr<PnPSolver> pnp_solver_;
   std::string current_frame_id_;
 
   // Camera switch
@@ -67,6 +79,12 @@ class ArmorDetectorNode : public rclcpp::Node
 
   // Image subscrpition
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
+
+  //
+  std::string odom_frame_;
+  Eigen::Matrix3d gimbal_to_camera_;
+  std::shared_ptr<tf2_ros::Buffer> tf2_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf2_listener_;
 
   // Debug information
   bool debug_;

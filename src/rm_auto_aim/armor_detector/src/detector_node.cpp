@@ -3,7 +3,10 @@
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/convert.h>
 
+#include <Eigen/Dense>
 #include <ament_index_cpp/get_package_share_directory.hpp>
+#include <cmath>
+#include <cstddef>
 #include <image_transport/image_transport.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -16,6 +19,7 @@
 #include <memory>
 #include <std_msgs/msg/bool.hpp>
 #include <string>
+#include <tf2_ros/create_timer_ros.hpp>
 #include <vector>
 
 #include "armor_detector/armor.hpp"
@@ -95,6 +99,18 @@ ArmorDetectorNode::ArmorDetectorNode(const rclcpp::NodeOptions& options)
         cam_center_ = cv::Point2f(static_cast<float>(camera_info->k[2]),
                                   static_cast<float>(camera_info->k[5]));
         cam_info_ = std::make_shared<sensor_msgs::msg::CameraInfo>(*camera_info);
+        if (!ba_solver_)
+        {
+          // Bundle adjustment solver
+          ba_solver_ = InitBaSolver();
+
+          if (ba_solver_)
+          {
+            InitTransformListener();
+            gimbal_to_camera_ = Eigen::Matrix3d::Identity();
+            gimbal_to_camera_ << 0, 0, 1, -1, 0, 0, 0, -1, 0;
+          }
+        }
         if (!pnp_solver_)
         {
           pnp_solver_ = InitPnPSolver();
@@ -144,6 +160,45 @@ void ArmorDetectorNode::ImageCallback(
       bool success = pnp_solver_->SolvePnP(armor, rvec, tvec);
       if (success)
       {
+        cv::Mat rmat = cv::Mat::zeros(3, 3, CV_64F);
+        cv::Rodrigues(rvec, rmat);
+        Eigen::Matrix3d r;
+        Eigen::Vector3d t;
+        cv::cv2eigen(rmat, r);
+        cv::cv2eigen(tvec, t);
+        if (ba_solver_ != nullptr)
+        {
+          // try
+          // {
+          //   rclcpp::Time target_time = img_msg->header.stamp;
+          //   auto odom_to_gimbal = tf2_buffer_->lookupTransform(
+          //       odom_frame_, img_msg->header.frame_id, target_time,
+          //       rclcpp::Duration::from_seconds(0.01));
+          //   auto msg_q = odom_to_gimbal.transform.rotation;
+          //   tf2::Quaternion tf_q;
+          //   tf2::fromMsg(msg_q, tf_q);
+          //   tf2::Matrix3x3 tf2_matrix = tf2::Matrix3x3(tf_q);
+          //   gimbal_to_camera_ << tf2_matrix.getRow(0)[0], tf2_matrix.getRow(0)[1],
+          //       tf2_matrix.getRow(0)[2], tf2_matrix.getRow(1)[0],
+          //       tf2_matrix.getRow(1)[1], tf2_matrix.getRow(1)[2],
+          //       tf2_matrix.getRow(2)[0], tf2_matrix.getRow(2)[1],
+          //       tf2_matrix.getRow(2)[2];
+          // }
+          // catch (...)
+          // {
+          //   RCLCPP_ERROR(this->get_logger(), "Something Wrong when lookUpTransform");
+          //   return;
+          // }
+
+          // 获得roll
+          double roll = (gimbal_to_camera_ * r).eulerAngles(0, 1, 2)[0];
+          ;
+          if (std::abs(roll) < M_PI_4 / 3)
+          {
+            r = ba_solver_->solveBa(armor, t, r, gimbal_to_camera_);
+          }
+        }
+        Eigen::Quaterniond q(r);
         // Fill basic info
         armor_msg.type = ARMOR_TYPE_STR[static_cast<int>(armor.type)];
         armor_msg.number = armor.number;
@@ -152,19 +207,11 @@ void ArmorDetectorNode::ImageCallback(
         armor_msg.pose.position.x = tvec.at<double>(0);
         armor_msg.pose.position.y = tvec.at<double>(1);
         armor_msg.pose.position.z = tvec.at<double>(2);
-        // rvec to 3x3 rotation matrix
-        cv::Mat rotation_matrix;
-        cv::Rodrigues(rvec, rotation_matrix);
         // rotation matrix to quaternion
-        tf2::Matrix3x3 tf2_rotation_matrix(
-            rotation_matrix.at<double>(0, 0), rotation_matrix.at<double>(0, 1),
-            rotation_matrix.at<double>(0, 2), rotation_matrix.at<double>(1, 0),
-            rotation_matrix.at<double>(1, 1), rotation_matrix.at<double>(1, 2),
-            rotation_matrix.at<double>(2, 0), rotation_matrix.at<double>(2, 1),
-            rotation_matrix.at<double>(2, 2));
-        tf2::Quaternion tf2_q;
-        tf2_rotation_matrix.getRotation(tf2_q);
-        armor_msg.pose.orientation = tf2::toMsg(tf2_q);
+        armor_msg.pose.orientation.x = q.x();
+        armor_msg.pose.orientation.y = q.y();
+        armor_msg.pose.orientation.z = q.z();
+        armor_msg.pose.orientation.w = q.w();
 
         // Fill the distance to image center
         armor_msg.distance_to_image_center =
@@ -178,7 +225,7 @@ void ArmorDetectorNode::ImageCallback(
         text_marker_.pose.position = armor_msg.pose.position;
         text_marker_.pose.position.y -= 0.1;
         text_marker_.text = armor.classfication_result;
-        armors_msg_.armors.emplace_back(armor_msg);
+        armors_msg_.armors.emplace_back(std::move(armor_msg));
         marker_array_.markers.emplace_back(armor_marker_);
         marker_array_.markers.emplace_back(text_marker_);
       }
@@ -271,6 +318,26 @@ std::unique_ptr<PnPSolver> ArmorDetectorNode::InitPnPSolver()
                                  .max_normal_dot = max_normal_dot,
                                  .reproj_weight = reproj_weight,
                                  .normal_weight = normal_weight});
+}
+
+std::unique_ptr<BaSolver> ArmorDetectorNode::InitBaSolver()
+{
+  bool use_ba_solver = this->declare_parameter("use_ba_solver", false);
+  if (use_ba_solver)
+  {
+    return std::make_unique<BaSolver>(cam_info_->k, cam_info_->d);
+  }
+  return nullptr;
+}
+
+void ArmorDetectorNode::InitTransformListener()
+{
+  odom_frame_ = this->declare_parameter("target_frame", "gimbal_odom");
+  tf2_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+  auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
+      this->get_node_base_interface(), this->get_node_timers_interface());
+  tf2_buffer_->setCreateTimerInterface(timer_interface);
+  tf2_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf2_buffer_);
 }
 
 std::vector<Armor> ArmorDetectorNode::DetectArmors(

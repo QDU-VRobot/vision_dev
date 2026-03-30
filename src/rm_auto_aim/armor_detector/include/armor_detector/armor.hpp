@@ -54,6 +54,8 @@ struct Light : public cv::RotatedRect
 
 struct Armor
 {
+  static constexpr const int N_LANDMARKS = 6;
+  static constexpr const int N_LANDMARKS_2 = N_LANDMARKS * 2;
   Armor() = default;
   Armor(const Light& l1, const Light& l2)
   {
@@ -66,6 +68,36 @@ struct Armor
       left_light = l2, right_light = l1;
     }
     center = (left_light.center + right_light.center) / 2;
+  }
+
+  template <typename PointType>
+  static inline std::vector<PointType> buildObjectPoints(const double& w,
+                                                         const double& h) noexcept
+  {
+    if constexpr (N_LANDMARKS == 4)
+    {
+      return {PointType(0, w / 2, -h / 2), PointType(0, w / 2, h / 2),
+              PointType(0, -w / 2, h / 2), PointType(0, -w / 2, -h / 2)};
+    }
+    else
+    {
+      return {PointType(0, w / 2, -h / 2), PointType(0, w / 2, 0),
+              PointType(0, w / 2, h / 2),  PointType(0, -w / 2, h / 2),
+              PointType(0, -w / 2, 0),     PointType(0, -w / 2, -h / 2)};
+    }
+  }
+  // Landmarks start from bottom left in clockwise order
+  std::vector<cv::Point2f> landmarks() const
+  {
+    if constexpr (N_LANDMARKS == 4)
+    {
+      return {left_light.bottom, left_light.top, right_light.top, right_light.bottom};
+    }
+    else
+    {
+      return {left_light.bottom, left_light.center,  left_light.top,
+              right_light.top,   right_light.center, right_light.bottom};
+    }
   }
 
   // Light pairs part

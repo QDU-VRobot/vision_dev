@@ -1,69 +1,79 @@
 cmake_minimum_required(VERSION 3.10)
 project(armor_detector)
 
-## Use C++14
+# Use C++14
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-## By adding -Wall and -Werror, the compiler does not ignore warnings anymore,
-## enforcing cleaner code.
-# add_definitions(-Wall -Werror)
+# By adding -Wall and -Werror, the compiler does not ignore warnings anymore,
+# enforcing cleaner code. add_definitions(-Wall -Werror)
 
-## Export compile commands for clangd
+# Export compile commands for clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-#######################
-## Find dependencies ##
-#######################
+# ##############################################################################
+# Find dependencies ##
+# ##############################################################################
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake_modules)
+set(EXTERNAL_INCLUDE_DIRS ${G2O_INCLUDE_DIR})
+set(EXTERNAL_LIBS ${G2O_LIBRARIES})
 
 find_package(ament_cmake_auto REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(TBB REQUIRED COMPONENTS tbb)
+find_package(G2O REQUIRED)
+find_package(Sophus REQUIRED)
+find_package(fmt REQUIRED)
 ament_auto_find_build_dependencies()
 
-###########
-## Build ##
-###########
+# ##############################################################################
+# Build ##
+# ##############################################################################
 
-ament_auto_add_library(${PROJECT_NAME} SHARED
-  DIRECTORY src
-)
+ament_auto_add_library(${PROJECT_NAME} SHARED DIRECTORY src)
 
-target_include_directories(${PROJECT_NAME} PUBLIC ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS})
+target_include_directories(
+  ${PROJECT_NAME} PUBLIC ${OpenCV_INCLUDE_DIRS} ${G2O_INCLUDE_DIRS}
+                         ${Sophus_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(
+  ${PROJECT_NAME}
+  ${OpenCV_LIBS}
+  g2o_core
+  g2o_stuff
+  g2o_solver_csparse
+  g2o_types_sba
+  g2o_types_slam3d
+  g2o_solver_dense
+  fmt::fmt
+  tbb)
 
-rclcpp_components_register_node(${PROJECT_NAME}
-  PLUGIN rm_auto_aim::ArmorDetectorNode
-  EXECUTABLE armor_detector_node
-)
+rclcpp_components_register_node(
+  ${PROJECT_NAME} PLUGIN rm_auto_aim::ArmorDetectorNode EXECUTABLE
+  armor_detector_node)
 
-#############
-## Testing ##
-#############
+# ##############################################################################
+# Testing ##
+# ##############################################################################
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  list(APPEND AMENT_LINT_AUTO_EXCLUDE
-    ament_cmake_copyright
-    ament_cmake_uncrustify
-    ament_cmake_cpplint
-  )
+  list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_copyright
+       ament_cmake_uncrustify ament_cmake_cpplint)
   ament_lint_auto_find_test_dependencies()
 
   find_package(ament_cmake_gtest)
 
   file(GLOB TEST_SOURCES test/*.cpp)
   foreach(TEST_SOURCE ${TEST_SOURCES})
-    get_filename_component(TEST_NAME ${TEST_SOURCE} NAME_WE)  
+    get_filename_component(TEST_NAME ${TEST_SOURCE} NAME_WE)
     ament_add_gtest(${TEST_NAME} ${TEST_SOURCE})
     target_link_libraries(${TEST_NAME} ${PROJECT_NAME})
   endforeach()
 endif()
 
-#############
-## Install ##
-#############
+# ##############################################################################
+# Install ##
+# ##############################################################################
 
-ament_auto_package(
-  INSTALL_TO_SHARE
-  model
-)
+ament_auto_package(INSTALL_TO_SHARE model)

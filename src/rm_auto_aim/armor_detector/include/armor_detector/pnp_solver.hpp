@@ -12,6 +12,12 @@
 
 namespace rm_auto_aim
 {
+// Unit: mm
+constexpr float SMALL_ARMOR_WIDTH = 135;
+constexpr float SMALL_ARMOR_HEIGHT = 55;
+constexpr float LARGE_ARMOR_WIDTH = 225;
+constexpr float LARGE_ARMOR_HEIGHT = 55;
+
 class PnPSolver
 {
  public:
@@ -37,6 +43,8 @@ class PnPSolver
   void SetCameraInfo(const std::array<double, 9>& camera_matrix,
                      const std::vector<double>& distortion_coefficients);
 
+                     
+
  private:
   struct Candidate
   {
@@ -60,12 +68,6 @@ class PnPSolver
   cv::Mat camera_matrix_;
   cv::Mat dist_coeffs_;
   PnpFilterParams pnp_filter_params_;
-
-  // Unit: mm
-  static constexpr float SMALL_ARMOR_WIDTH = 135;
-  static constexpr float SMALL_ARMOR_HEIGHT = 55;
-  static constexpr float LARGE_ARMOR_WIDTH = 225;
-  static constexpr float LARGE_ARMOR_HEIGHT = 55;
 
   // Four vertices of armor in 3d
   // Unit: m
