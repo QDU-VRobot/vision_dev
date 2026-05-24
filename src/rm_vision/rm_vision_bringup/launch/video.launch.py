@@ -88,8 +88,11 @@ def get_video_detector_container(
 
 
 def generate_launch_description() -> LaunchDescription:
+    from rosbag_record import get_rosbag_record_actions
+
     return LaunchDescription(
         [
+            *get_rosbag_record_actions(bag_name_prefix="video"),
             DeclareLaunchArgument(
                 "video_path",
                 default_value="",

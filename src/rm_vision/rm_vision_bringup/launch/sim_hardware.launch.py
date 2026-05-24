@@ -105,6 +105,8 @@ def _build_after_checkout(context, *args, **kwargs):
 
 
 def generate_launch_description():
+    from rosbag_record import get_rosbag_record_actions
+
     ws_root = LaunchConfiguration("ws_root")
     robot = LaunchConfiguration("robot")
 
@@ -133,6 +135,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("ws_root", default_value=os.getcwd()),
             DeclareLaunchArgument("robot", default_value=""),
+            *get_rosbag_record_actions(bag_name_prefix="sim_hardware"),
             checkout_robot,
             RegisterEventHandler(
                 OnProcessExit(

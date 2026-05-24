@@ -197,6 +197,7 @@ bool ArmorPoseOptimizer::CheckConstraint(const Eigen::Matrix3d& R_cam, double& y
 
   if (is_outpost_)
   {
+    return false;
     pitch_prior = outpost_pitch_rad_;
   }
   else
@@ -492,12 +493,11 @@ bool ArmorPoseOptimizer::RunRangeSolve(
 {
   if (params_.range_fix_t_cam_)
   {
-    return SearchYawWithT(yaw, pitch_prior, t_cam, obj_points, img_points_ud,
-                          best_error_out);
+    return SearchYaw(yaw, pitch_prior, t_cam, obj_points, img_points_ud, best_error_out);
   }
   else
   {
-    return SearchYaw(yaw, pitch_prior, t_cam, obj_points, img_points_ud, best_error_out);
+    return SearchYawWithT(yaw, pitch_prior, t_cam, obj_points, img_points_ud, best_error_out);
   }
   return true;
 }

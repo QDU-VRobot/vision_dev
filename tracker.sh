@@ -1,12 +1,12 @@
 #!/bin/bash
 
-delay_time=3
+delay_time=6
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 while true
 do
-    ps -ef | grep "container" | grep -v "grep" > /dev/null
+    ps -ef | grep "container_mt" | grep -v "grep" > /dev/null
     
     if [ $? -ne 0 ]
     then

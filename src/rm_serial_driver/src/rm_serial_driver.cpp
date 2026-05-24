@@ -37,6 +37,8 @@ RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions& options)
 
   lob_shot_topic_ = LibXR::Topic::FindOrCreate<uint8_t>("lob_shot");
 
+  reset_topic_ = LibXR::Topic::FindOrCreate<uint8_t>("reset");
+
   // 发送到下位机的话题
   LibXR::Topic::Domain tracker_domain = LibXR::Topic::Domain("tracker");
   if (is_send_vel_)
@@ -62,6 +64,9 @@ RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions& options)
     lob_shot_pub_ = this->create_publisher<std_msgs::msg::Bool>(
         "/lob_shot_switch", rclcpp::QoS(1).reliable());
   }
+
+  reset_pub_ =
+      this->create_publisher<std_msgs::msg::Bool>("/reset", rclcpp::QoS(1).reliable());
 
   // 打弹（t键打弹，g键停止）
   // fire_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -133,6 +138,23 @@ RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions& options)
     auto lob_shot_cb = LibXR::Topic::Callback::Create(lob_shot_cb_fun, this);
     lob_shot_topic_.RegisterCallback(lob_shot_cb);
   }
+
+  void (*reset_cb_fun)(bool, RMSerialDriver* self, LibXR::RawData& data) =
+      [](bool, RMSerialDriver* self, LibXR::RawData& data)
+  {
+    auto val = *reinterpret_cast<uint8_t*>(data.addr_);
+    uint8_t prev = self->last_reset_val_;
+    self->last_reset_val_ = val;
+    if (prev == 0 && val != 0)
+    {
+      std_msgs::msg::Bool msg;
+      msg.data = true;
+      self->reset_pub_->publish(msg);
+      RCLCPP_WARN(self->get_logger(), "player wants tracker reset");
+    }
+  };
+  auto reset_cb = LibXR::Topic::Callback::Create(reset_cb_fun, this);
+  reset_topic_.RegisterCallback(reset_cb);
 }
 
 RMSerialDriver::~RMSerialDriver() {}

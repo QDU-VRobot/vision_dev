@@ -62,8 +62,8 @@ def _build_after_checkout(context, *args, **kwargs):
 
     robot_type = LaunchConfiguration("robot").perform(context)
 
-    vision_cpu_list = launch_params.get("vision_cpu_list", "4-6")
-    trajectory_cpu_list = launch_params.get("trajectory_cpu_list", "7")
+    vision_cpu_list = launch_params.get("vision_cpu_list", "2-5")
+    trajectory_cpu_list = launch_params.get("trajectory_cpu_list", "6")
 
     # 普通视觉节点：优先 CPU4-6；若机器不支持则自动跳过 taskset
     vision_container = ComposableNodeContainer(
@@ -127,6 +127,8 @@ def _build_after_checkout(context, *args, **kwargs):
 
 
 def generate_launch_description():
+    from rosbag_record import get_rosbag_record_actions
+
     ws_root = LaunchConfiguration("ws_root")
     robot = LaunchConfiguration("robot")
 
@@ -155,6 +157,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("ws_root", default_value=os.getcwd()),
             DeclareLaunchArgument("robot", default_value=""),
+            # *get_rosbag_record_actions(bag_name_prefix="vision"),
             checkout_robot,
             RegisterEventHandler(
                 OnProcessExit(

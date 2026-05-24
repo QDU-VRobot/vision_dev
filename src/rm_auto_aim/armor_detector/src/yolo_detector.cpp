@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -100,11 +101,13 @@ std::string map_label(std::string_view raw_label)
   }
   if (raw_label == "base")
   {
-    return "base";
+    // return "base";
+    return "outpost";
   }
   if (raw_label == "basesmall")
   {
-    return "base";
+    // return "base";
+    return "outpost";
   }
 
   return "negative";
@@ -155,6 +158,42 @@ TRTLogger& get_trt_logger()
   static TRTLogger logger;
   return logger;
 }
+
+void bind_thread_once()
+{
+  static std::once_flag f;
+  std::call_once(f, []{
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(3, &set);
+    CPU_SET(4, &set);
+    CPU_SET(5, &set);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(set), &set) != 0) {
+      RCLCPP_WARN(rclcpp::get_logger("armor_detector"),
+                  "setaffinity failed: %s", strerror(errno));
+    }
+
+    // 先尝试 SCHED_FIFO
+    sched_param fifo{};
+    fifo.sched_priority = 80;
+    int rc = pthread_setschedparam(pthread_self(), SCHED_FIFO, &fifo);
+    if (rc == 0) {
+      RCLCPP_INFO(rclcpp::get_logger("armor_detector"),
+                  "detector thread: SCHED_FIFO prio=80, bound to CPU 3,4,5");
+      return;
+    }
+
+    // 降级：SCHED_OTHER + 最高负 nice
+    if (nice(-20) == -1 && errno != 0) {
+      RCLCPP_WARN(rclcpp::get_logger("armor_detector"),
+                  "nice(-20) failed: %s (no CAP_SYS_NICE)", strerror(errno));
+    } else {
+      RCLCPP_INFO(rclcpp::get_logger("armor_detector"),
+                  "detector thread: SCHED_OTHER nice=-20, bound to CPU 3,4,5");
+    }
+  });
+}
+
 
 inline void ensure_trt_plugins_initialized()
 {
@@ -292,9 +331,29 @@ std::unique_ptr<YoloDetector> YoloDetector::Create(rclcpp::Node& node)
           get_parameter<std::vector<std::string>>(node, "ignore_classes", {"negative"}),
       .detect_color = get_parameter<int>(node, "detect_color", RED),
       .num_keypoints = get_parameter<int>(node, "yolo.num_keypoints", 4),
-      .large_armor_ratio_threshold = static_cast<float>(
-          get_parameter<double>(node, "yolo.large_armor_ratio_threshold", 3.2)),
-      .end_to_end = get_parameter<bool>(node, "yolo.end_to_end", false)};
+      .end_to_end = get_parameter<bool>(node, "yolo.end_to_end", false),
+      // 复用传统路径 (armor.*) 的同名 YAML key, 与 detector.cpp 兼容
+      .min_light_ratio = get_parameter<double>(node, "armor.min_light_ratio", 0.7),
+      .min_small_center_distance =
+          get_parameter<double>(node, "armor.min_small_center_distance", 0.8),
+      .max_small_center_distance =
+          get_parameter<double>(node, "armor.max_small_center_distance", 3.2),
+      .min_large_center_distance =
+          get_parameter<double>(node, "armor.min_large_center_distance", 3.2),
+      .max_large_center_distance =
+          get_parameter<double>(node, "armor.max_large_center_distance", 5.5),
+      .max_armor_angle = get_parameter<double>(node, "armor.max_angle", 35.0),
+      // 灯条二值化 + 颜色过滤 (复用传统路径 binary_lower_thres / binary_upper_thres)
+      .binary_lower_thres = get_parameter<int>(node, "binary_lower_thres", 160),
+      .binary_upper_thres = get_parameter<int>(node, "binary_upper_thres", 255),
+      // 灯条角点校正 (复用传统路径 corner_corrector.* YAML key)
+      .use_corner_corrector =
+          get_parameter<bool>(node, "corner_corrector.use_corner_corrector", false),
+      .cc_max_brightness =
+          get_parameter<double>(node, "corner_corrector.max_brightness", 25.0),
+      .cc_scale = get_parameter<double>(node, "corner_corrector.scale", 0.07),
+      .cc_start = get_parameter<double>(node, "corner_corrector.start", 0.4),
+      .cc_end = get_parameter<double>(node, "corner_corrector.end", 0.6)};
 
   return std::make_unique<YoloDetector>(yolo_params);
 }
@@ -319,8 +378,20 @@ inline void cuda_alloc_pinned(T** p, std::size_t n)
 YoloDetector::YoloDetector(const YoloParams& params)
     : params_(params), class_num_(static_cast<int>(YOLO11_MODEL_LABELS.size()))
 {
+  bind_thread_once();
   build_class_luts(params_.ignore_classes, class_num_, class_label_lut_, class_color_lut_,
                    class_ignored_lut_);
+
+  if (params_.use_corner_corrector)
+  {
+    light_corner_corrector_ = std::make_unique<LightCornerCorrector>(
+        params_.cc_max_brightness, params_.cc_scale, params_.cc_start, params_.cc_end);
+    RCLCPP_INFO(rclcpp::get_logger("armor_detector"),
+                "[YOLO] LightCornerCorrector enabled "
+                "(max_brightness=%.2f scale=%.2f start=%.2f end=%.2f)",
+                params_.cc_max_brightness, params_.cc_scale, params_.cc_start,
+                params_.cc_end);
+  }
 
   if (params_.end_to_end)
   {
@@ -579,8 +650,8 @@ void YoloDetector::InitTrtEnd2End()
   pp_cfg.swap_rb = false;
   preprocessor_ = std::make_unique<GpuPreprocessor>(pp_cfg);
 
-  // cudaEventCreateWithFlags(&ev_start_, cudaEventDefault);
-  // cudaEventCreateWithFlags(&ev_end_, cudaEventDefault);
+  cudaEventCreateWithFlags(&ev_start_, cudaEventDefault);
+  cudaEventCreateWithFlags(&ev_end_, cudaEventDefault);
 }
 
 YoloDetector::~YoloDetector()
@@ -676,6 +747,17 @@ DetectionResult YoloDetector::Detect(const cv::Mat& rgb_img)
   {
     result = DetectTrtRaw(rgb_img);
   }
+
+  // 二值化 + 颜色过滤 (剔除未点亮灯条) + 可选角点校正
+  auto post_start_time = std::chrono::steady_clock::now();
+  PostProcessLights(rgb_img);
+  result.armors = last_armors_;
+  auto post_end_time = std::chrono::steady_clock::now();
+  auto post_latency = std::chrono::duration_cast<std::chrono::microseconds>(
+                          post_end_time - post_start_time)
+                          .count();
+  debug_latencies_.emplace_back("PostProcess Lights", static_cast<uint64_t>(post_latency));
+
   auto total_end_time = std::chrono::steady_clock::now();
   auto total_latency = std::chrono::duration_cast<std::chrono::microseconds>(
                            total_end_time - total_start_time)
@@ -731,7 +813,7 @@ DetectionResult YoloDetector::DetectTrtRaw(const cv::Mat& rgb_img)
 
 DetectionResult YoloDetector::DetectTrtEnd2End(const cv::Mat& rgb_img)
 {
-  // auto t0 = std::chrono::steady_clock::now();
+  auto t0 = std::chrono::steady_clock::now();
   debug_latencies_.clear();
   DetectionResult result;
   if (rgb_img.empty())
@@ -743,13 +825,13 @@ DetectionResult YoloDetector::DetectTrtEnd2End(const cv::Mat& rgb_img)
 
   preprocessor_->EnsureInitialized(rgb_img.rows, rgb_img.cols);
   preprocessor_->StageHost(rgb_img);
-  // auto t1 = std::chrono::steady_clock::now();
+  auto t1 = std::chrono::steady_clock::now();
   const double SCALE = preprocessor_->GetScale();
 
   auto t_infer_start = std::chrono::steady_clock::now();
 
-  // auto t2 = std::chrono::steady_clock::now();
-  // auto t3 = std::chrono::steady_clock::now();
+  auto t2 = std::chrono::steady_clock::now();
+  auto t3 = std::chrono::steady_clock::now();
   if (!graph_ready_)
   {
     preprocessor_->Launch(static_cast<float*>(d_input_), stream_);
@@ -772,9 +854,9 @@ DetectionResult YoloDetector::DetectTrtEnd2End(const cv::Mat& rgb_img)
         h_kpts_, d_kpts_,
         static_cast<std::size_t>(keep_topk_) * kpt_channels_ * sizeof(float),
         cudaMemcpyDeviceToHost, stream_));
-    // t2 = std::chrono::steady_clock::now();
+    t2 = std::chrono::steady_clock::now();
     ARMOR_DETECTOR_CHECK_CUDA(cudaStreamSynchronize(stream_));
-    // t3 = std::chrono::steady_clock::now();
+    t3 = std::chrono::steady_clock::now();
     preprocessor_->StageHost(rgb_img);
 
     // capture
@@ -808,23 +890,156 @@ DetectionResult YoloDetector::DetectTrtEnd2End(const cv::Mat& rgb_img)
   }
   else
   {
-    // cudaEventRecord(ev_start_, stream_);
+    cudaEventRecord(ev_start_, stream_);
     cudaGraphLaunch(graph_exec_, stream_);
-    // cudaEventRecord(ev_end_, stream_);
-    // t2 = std::chrono::steady_clock::now();
+    cudaEventRecord(ev_end_, stream_);
+    t2 = std::chrono::steady_clock::now();
     cudaStreamSynchronize(stream_);
-    // t3 = std::chrono::steady_clock::now();
-    // float gpu_ms = 0.f;
-    // cudaEventElapsedTime(&gpu_ms, ev_start_, ev_end_);
-    // RCLCPP_WARN(rclcpp::get_logger("armor_detector"), "GPU time (CUDA Graph): %.2f ms",
-    //             gpu_ms);
+    t3 = std::chrono::steady_clock::now();
+    float gpu_ms = 0.f;
+    cudaEventElapsedTime(&gpu_ms, ev_start_, ev_end_);
+    RCLCPP_WARN(rclcpp::get_logger("armor_detector"), "GPU time (CUDA Graph): %.2f ms",
+                gpu_ms);
   }
 
   auto t_infer_end = std::chrono::steady_clock::now();
 
   auto t_parse_start = std::chrono::steady_clock::now();
   last_armors_ = ParseEnd2End(SCALE);
-  // auto t4 = std::chrono::steady_clock::now();
+  //   if (!last_armors_.empty())
+  // {
+  //   static const std::string pkg_path =
+  //       ament_index_cpp::get_package_share_directory("armor_detector");
+  //   static const std::string mlp_model_path = pkg_path + "/model/mlp.onnx";
+  //   static const std::string mlp_label_path = pkg_path + "/model/label.txt";
+
+  //   static cv::dnn::Net number_net = []()
+  //   {
+  //     return cv::dnn::readNetFromONNX(
+  //         ament_index_cpp::get_package_share_directory("armor_detector") +
+  //         "/model/mlp.onnx");
+  //   }();
+
+  //   static const std::vector<std::string> number_labels = []()
+  //   {
+  //     std::vector<std::string> labels;
+  //     std::ifstream label_file(
+  //         ament_index_cpp::get_package_share_directory("armor_detector") +
+  //         "/model/label.txt");
+
+  //     std::string line;
+  //     while (std::getline(label_file, line))
+  //     {
+  //       if (!line.empty())
+  //       {
+  //         labels.emplace_back(line);
+  //       }
+  //     }
+
+  //     return labels;
+  //   }();
+
+  //   constexpr int LIGHT_LENGTH = 12;
+  //   constexpr int WARP_HEIGHT = 28;
+  //   constexpr int SMALL_ARMOR_WIDTH = 32;
+  //   constexpr int LARGE_ARMOR_WIDTH = 54;
+  //   const cv::Size ROI_SIZE(20, 28);
+
+  //   std::vector<cv::Mat> number_imgs;
+  //   number_imgs.reserve(last_armors_.size());
+
+  //   for (auto& armor : last_armors_)
+  //   {
+  //     cv::Point2f lights_vertices[4] = {armor.left_light.bottom, armor.left_light.top,
+  //                                       armor.right_light.top, armor.right_light.bottom};
+
+  //     const int TOP_LIGHT_Y = (WARP_HEIGHT - LIGHT_LENGTH) / 2 - 1;
+  //     const int BOTTOM_LIGHT_Y = TOP_LIGHT_Y + LIGHT_LENGTH;
+  //     const int WARP_WIDTH =
+  //         armor.type == ArmorType::SMALL ? SMALL_ARMOR_WIDTH : LARGE_ARMOR_WIDTH;
+
+  //     cv::Point2f target_vertices[4] = {
+  //         cv::Point2f(0.0f, static_cast<float>(BOTTOM_LIGHT_Y)),
+  //         cv::Point2f(0.0f, static_cast<float>(TOP_LIGHT_Y)),
+  //         cv::Point2f(static_cast<float>(WARP_WIDTH - 1),
+  //                     static_cast<float>(TOP_LIGHT_Y)),
+  //         cv::Point2f(static_cast<float>(WARP_WIDTH - 1),
+  //                     static_cast<float>(BOTTOM_LIGHT_Y))};
+
+  //     cv::Mat number_image;
+  //     const auto perspective_matrix =
+  //         cv::getPerspectiveTransform(lights_vertices, target_vertices);
+
+  //     cv::warpPerspective(rgb_img, number_image, perspective_matrix,
+  //                         cv::Size(WARP_WIDTH, WARP_HEIGHT), cv::INTER_LINEAR,
+  //                         cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
+
+  //     const cv::Rect number_roi(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0),
+  //                               ROI_SIZE);
+
+  //     number_image = number_image(number_roi);
+
+  //     cv::cvtColor(number_image, number_image, cv::COLOR_RGB2GRAY);
+  //     cv::threshold(number_image, number_image, 0, 255,
+  //                   cv::THRESH_BINARY | cv::THRESH_OTSU);
+
+  //     armor.number_img = number_image;
+  //     number_imgs.emplace_back(number_image);
+
+  //     cv::Mat image_f32;
+  //     number_image.convertTo(image_f32, CV_32F, 1.0 / 255.0);
+
+  //     cv::Mat blob;
+  //     cv::dnn::blobFromImage(image_f32, blob);
+
+  //     number_net.setInput(blob);
+  //     cv::Mat logits = number_net.forward();
+
+  //     float max_logit = -std::numeric_limits<float>::infinity();
+  //     int best_id = 0;
+
+  //     const float* logits_ptr = logits.ptr<float>();
+  //     const int class_count = static_cast<int>(logits.total());
+
+  //     for (int i = 0; i < class_count; ++i)
+  //     {
+  //       if (logits_ptr[i] > max_logit)
+  //       {
+  //         max_logit = logits_ptr[i];
+  //         best_id = i;
+  //       }
+  //     }
+
+  //     float exp_sum = 0.0f;
+  //     for (int i = 0; i < class_count; ++i)
+  //     {
+  //       exp_sum += std::exp(logits_ptr[i] - max_logit);
+  //     }
+
+  //     const float confidence = exp_sum > 1e-6f ? 1.0f / exp_sum : 0.0f;
+
+  //     if (best_id >= 0 && best_id < static_cast<int>(number_labels.size()))
+  //     {
+  //       armor.number = number_labels[best_id];
+  //       armor.confidence = confidence;
+
+  //       std::ostringstream result_ss;
+  //       result_ss << armor.number << ": " << std::fixed << std::setprecision(1)
+  //                 << armor.confidence * 100.0f << "%";
+  //       armor.classfication_result = result_ss.str();
+  //     }
+  //     RCLCPP_ERROR(rclcpp::get_logger("armor_detector"), "%s", armor.number.c_str());
+  //   }
+
+  //   if (!number_imgs.empty())
+  //   {
+  //     cv::Mat all_num_img;
+  //     cv::vconcat(number_imgs, all_num_img);
+  //     result.numbers_image = all_num_img;
+  //   }
+  // }
+
+  auto t4 = std::chrono::steady_clock::now();
   result.armors = last_armors_;
   auto t_parse_end = std::chrono::steady_clock::now();
 
@@ -908,8 +1123,15 @@ std::vector<Armor> YoloDetector::ParseEnd2End(double scale)
     Light ll(kps[0], kps[1], color);
     Light rl(kps[2], kps[3], color);
 
+    // 合法性判别 + 分型 (合并: INVALID 表示不合法)
+    ArmorType type = DetermineArmorType(ll, rl);
+    if (type == ArmorType::INVALID)
+    {
+      continue;
+    }
+
     Armor armor(ll, rl);
-    armor.type = DetermineArmorType(ll, rl);
+    armor.type = type;
     armor.number = class_label_lut_[cls];
     armor.confidence = conf;
 
@@ -932,6 +1154,17 @@ YoloDetector::YoloDetector(const YoloParams& params)
   // 1) 一次性建立 per-class LUT, 避免每帧 std::find / map_label
   build_class_luts(params_.ignore_classes, class_num_, class_label_lut_, class_color_lut_,
                    class_ignored_lut_);
+
+  if (params_.use_corner_corrector)
+  {
+    light_corner_corrector_ = std::make_unique<LightCornerCorrector>(
+        params_.cc_max_brightness, params_.cc_scale, params_.cc_start, params_.cc_end);
+    RCLCPP_INFO(rclcpp::get_logger("armor_detector"),
+                "[YOLO] LightCornerCorrector enabled "
+                "(max_brightness=%.2f scale=%.2f start=%.2f end=%.2f)",
+                params_.cc_max_brightness, params_.cc_scale, params_.cc_start,
+                params_.cc_end);
+  }
 
   // 2) 读模型
   auto model = core_.read_model(params_.model_path);
@@ -1084,6 +1317,9 @@ DetectionResult YoloDetector::Detect(const cv::Mat& rgb_img)
     last_armors_ = Parse(ov_cached_scale_, output);
   }
 
+  // 二值化 + 颜色过滤 (剔除未点亮灯条) + 可选角点校正
+  PostProcessLights(rgb_img);
+
   result.armors = last_armors_;
   auto t_parse_end = std::chrono::steady_clock::now();
 
@@ -1163,8 +1399,15 @@ std::vector<Armor> YoloDetector::ParseOpenVinoEnd2End(double scale, int n,
     Light ll(keypoints[0], keypoints[1], color);
     Light rl(keypoints[2], keypoints[3], color);
 
+    // 合法性判别 + 分型 (合并: INVALID 表示不合法)
+    ArmorType type = DetermineArmorType(ll, rl);
+    if (type == ArmorType::INVALID)
+    {
+      continue;
+    }
+
     Armor armor(ll, rl);
-    armor.type = DetermineArmorType(ll, rl);
+    armor.type = type;
     armor.number = class_label_lut_[cls];
     armor.confidence = conf;
 
@@ -1329,8 +1572,15 @@ std::vector<Armor> YoloDetector::Parse(double scale, const cv::Mat& output)
     Light left_light(keypoints[0], keypoints[1], color);
     Light right_light(keypoints[2], keypoints[3], color);
 
+    // 合法性判别 + 分型 (合并: INVALID 表示不合法)
+    ArmorType type = DetermineArmorType(left_light, right_light);
+    if (type == ArmorType::INVALID)
+    {
+      continue;
+    }
+
     Armor armor(left_light, right_light);
-    armor.type = DetermineArmorType(left_light, right_light);
+    armor.type = type;
     armor.number = class_label_lut_[class_id];
     armor.confidence = conf;
 
@@ -1375,17 +1625,185 @@ void YoloDetector::SortKeypoints(std::vector<cv::Point2f>& keypoints)
 
 ArmorType YoloDetector::DetermineArmorType(const Light& light_1, const Light& light_2)
 {
-  auto avg_length = (light_1.length + light_2.length) / 2.0;
-  auto center_distance = cv::norm(light_2.center - light_1.center);
-
-  if (avg_length < 1e-6)
+  // 退化情况: 灯条长度过小, 视为非法 (避免后续除零)
+  if (light_1.length < 1e-6 || light_2.length < 1e-6)
   {
     return ArmorType::INVALID;
   }
 
-  double ratio = center_distance / avg_length;
-  return ratio > params_.large_armor_ratio_threshold ? ArmorType::LARGE
-                                                     : ArmorType::SMALL;
+  // 1) 两灯条长度比 (短/长)
+  double light_length_ratio = light_1.length < light_2.length
+                                  ? light_1.length / light_2.length
+                                  : light_2.length / light_1.length;
+  if (light_length_ratio <= params_.min_light_ratio)
+  {
+    return ArmorType::INVALID;
+  }
+
+  // 2) 中心距 (以平均灯条长为单位) 落在 SMALL 或 LARGE 装甲板的合法区间
+  double avg_light_length = (light_1.length + light_2.length) / 2.0;
+  double center_distance = cv::norm(light_1.center - light_2.center) / avg_light_length;
+  bool center_distance_ok = (params_.min_small_center_distance <= center_distance &&
+                             center_distance < params_.max_small_center_distance) ||
+                            (params_.min_large_center_distance <= center_distance &&
+                             center_distance < params_.max_large_center_distance);
+  if (!center_distance_ok)
+  {
+    return ArmorType::INVALID;
+  }
+
+  // 3) 两灯条中心连线与水平方向的夹角
+  cv::Point2f diff = light_1.center - light_2.center;
+  // atan2(|y|, |x|) 直接落在 [0, pi/2], 等价于传统路径的 |atan(y/x)|, 但无除零风险
+  double angle = std::atan2(std::abs(static_cast<double>(diff.y)),
+                            std::abs(static_cast<double>(diff.x))) /
+                 CV_PI * 180.0;
+  if (angle >= params_.max_armor_angle)
+  {
+    return ArmorType::INVALID;
+  }
+
+  // 合法 -> 以 min_large_center_distance 作为 SMALL/LARGE 分界
+  return center_distance > params_.min_large_center_distance ? ArmorType::LARGE
+                                                             : ArmorType::SMALL;
+}
+
+void YoloDetector::PostProcessLights(const cv::Mat& rgb_img)
+{
+  if (last_armors_.empty() || rgb_img.empty())
+  {
+    return;
+  }
+
+  // Step 1: 灰度化 + 阈值二值化 (对齐传统路径 Detector::PreprocessImage)
+  cv::cvtColor(rgb_img, gray_img_, cv::COLOR_RGB2GRAY);
+  cv::inRange(gray_img_, cv::Scalar(params_.binary_lower_thres),
+              cv::Scalar(params_.binary_upper_thres), binary_img_);
+
+  // Step 2: 对每根灯条做二值化验证 + 颜色判定。
+  // YOLO 关键点构造的 Light 只填充了 top/bottom/length/axis/tilt_angle, 其
+  // cv::RotatedRect 基类是默认值, light.width 为 0, 这会让 LightCornerCorrector
+  // 直接跳过 (PASS_OPTIMIZE_WIDTH = 3)。这里从 contour 的 minAreaRect 回填基类
+  // 状态与 width, 同时利用 contour 内的 R/B 像素和验证颜色 (与传统 FindLights
+  // 完全一致的约定)。
+  const int img_w = rgb_img.cols;
+  const int img_h = rgb_img.rows;
+
+  auto verify_light = [&](Light& light) -> bool
+  {
+    // ROI: 以 YOLO 关键点为基准的小范围, 横向多预留一些以覆盖灯条宽度。
+    const float length = static_cast<float>(light.length);
+    const float lx = std::min(light.top.x, light.bottom.x);
+    const float rx = std::max(light.top.x, light.bottom.x);
+    const float ty = std::min(light.top.y, light.bottom.y);
+    const float by = std::max(light.top.y, light.bottom.y);
+    const float margin_x = std::max(length * 0.3f, 4.0f);
+    const float margin_y = std::max(length * 0.05f, 2.0f);
+
+    cv::Rect rect(static_cast<int>(std::floor(lx - margin_x)),
+                  static_cast<int>(std::floor(ty - margin_y)),
+                  static_cast<int>(std::ceil(rx - lx + 2.0f * margin_x)),
+                  static_cast<int>(std::ceil(by - ty + 2.0f * margin_y)));
+    rect &= cv::Rect(0, 0, img_w, img_h);
+    if (rect.width <= 0 || rect.height <= 0)
+    {
+      return false;
+    }
+
+    // findContours: ROI-local 坐标; 后续需要时再加 rect.x / rect.y 还原全图坐标。
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(binary_img_(rect), contours, cv::RETR_EXTERNAL,
+                     cv::CHAIN_APPROX_SIMPLE);
+    if (contours.empty())
+    {
+      return false;
+    }
+
+    // 找到中心最贴近 YOLO 关键点中线中点的 contour (ROI-local 坐标比对)
+    const cv::Point2f kp_center_local =
+        (light.top + light.bottom) * 0.5f -
+        cv::Point2f(static_cast<float>(rect.x), static_cast<float>(rect.y));
+
+    int best_idx = -1;
+    double best_dist = std::numeric_limits<double>::max();
+    for (std::size_t i = 0; i < contours.size(); ++i)
+    {
+      if (contours[i].size() < 5)
+      {
+        continue;
+      }
+      cv::Moments m = cv::moments(contours[i]);
+      if (m.m00 <= 0.0)
+      {
+        continue;
+      }
+      cv::Point2f cc(static_cast<float>(m.m10 / m.m00),
+                     static_cast<float>(m.m01 / m.m00));
+      double d = cv::norm(cc - kp_center_local);
+      if (d < best_dist)
+      {
+        best_dist = d;
+        best_idx = static_cast<int>(i);
+      }
+    }
+    if (best_idx < 0)
+    {
+      return false;
+    }
+
+    // 颜色判定: 遍历 contour 包围盒, pointPolygonTest 内的像素累加 R/B
+    // (与传统 Detector::FindLights 完全一致, 通道顺序按 RGB: [0]=R, [2]=B)
+    const auto& contour = contours[best_idx];
+    const cv::Rect c_rect = cv::boundingRect(contour);
+    long sum_r = 0;
+    long sum_b = 0;
+    for (int i = 0; i < c_rect.height; ++i)
+    {
+      for (int j = 0; j < c_rect.width; ++j)
+      {
+        const cv::Point2f p(static_cast<float>(j + c_rect.x),
+                            static_cast<float>(i + c_rect.y));
+        if (cv::pointPolygonTest(contour, p, false) >= 0)
+        {
+          const auto& px = rgb_img.at<cv::Vec3b>(static_cast<int>(p.y) + rect.y,
+                                                 static_cast<int>(p.x) + rect.x);
+          sum_r += px[0];
+          sum_b += px[2];
+        }
+      }
+    }
+    const int detected_color = sum_r > sum_b ? RED : BLUE;
+    if (detected_color != params_.detect_color)
+    {
+      return false;
+    }
+
+    // 回填 RotatedRect 基类 (用于 boundingRect) + width (用于 corner_corrector)。
+    // 保留 YOLO 关键点的 top/bottom/length/axis/tilt_angle, 由 corner_corrector
+    // 进一步细化。
+    cv::RotatedRect rr = cv::minAreaRect(contour);
+    rr.center += cv::Point2f(static_cast<float>(rect.x), static_cast<float>(rect.y));
+    static_cast<cv::RotatedRect&>(light) = rr;
+    light.width = std::min(rr.size.width, rr.size.height);
+    light.color = detected_color;
+    return true;
+  };
+
+  // Step 3: 任一灯条未通过验证 (未点亮 / 颜色不匹配) 即丢弃整个 armor
+  last_armors_.erase(
+      std::remove_if(last_armors_.begin(), last_armors_.end(),
+                     [&](Armor& a)
+                     {
+                       return !verify_light(a.left_light) ||
+                              !verify_light(a.right_light);
+                     }),
+      last_armors_.end());
+
+  // Step 4: 可选角点校正 (沿对称轴搜索亮度梯度, 把 YOLO 关键点修正到亚像素端点)
+  if (light_corner_corrector_ && !last_armors_.empty())
+  {
+    light_corner_corrector_->CorrectCorners(last_armors_, gray_img_);
+  }
 }
 
 void YoloDetector::DrawResults(cv::Mat& img)

@@ -178,11 +178,11 @@ double TrajectorySolver::SolvePitch(double x, double y, double z)
   double distance = std::sqrt(x * x + y * y);
   double target_s = distance + s_bias_;
   double target_z = z + z_bias_;
-  if (std::fabs(z) < 0.01)
-  {
-    RCLCPP_WARN(logger_, "Target z is too low: %.2f", target_z);
-    return 0.0f;
-  }
+  // if (std::fabs(z) < 0.01)
+  // {
+  //   RCLCPP_WARN(logger_, "Target z is too low: %.2f", target_z);
+  //   return 0.0f;
+  // }
 
   double pitch = 0.0f;
   bool use_iteration = false;  // 是否需要走迭代法
@@ -260,7 +260,7 @@ std::pair<double, double> TrajectorySolver::ComputeFireYawWindow(
     const TarPostion& armor) const
 {
   const double half_length_ =
-      ((target_.type == "small") ? SMALL_HALF_LENGTH : LARGE_HALF_LENGTH) - 0.03;
+      ((target_.type == "small") ? SMALL_HALF_LENGTH : LARGE_HALF_LENGTH);
 
   const double sy = std::sin(armor.yaw);
   const double cy = std::cos(armor.yaw);
@@ -291,7 +291,7 @@ bool TrajectorySolver::CanFire(double tar_yaw, double tar_pitch, bool is_fast_fi
   const auto [yaw_lo, yaw_hi] = ComputeFireYawWindow(p);
 
   const double control_delta = AngleDiff(tar_yaw, gimbal_yaw_);
-  const bool yaw_ok = (control_delta >= yaw_lo) && (control_delta <= yaw_hi);
+  const bool yaw_ok = (control_delta >= yaw_lo + 0.001) && (control_delta <= yaw_hi - 0.001);
   const bool pitch_ok = std::fabs(tar_pitch - gimbal_pitch_) <= 0.02;
 
   const bool stable_tracking = std::fabs(target_.velocity.x - last_x_v_) < 0.4 &&
@@ -304,6 +304,8 @@ bool TrajectorySolver::CanFire(double tar_yaw, double tar_pitch, bool is_fast_fi
   }
 
   const bool angle_diff_exceeds = !yaw_ok || !pitch_ok;
+  const bool yaw_error_exceeds = !yaw_ok;
+  const bool pitch_error_exceeds = !pitch_ok;
 
   if (choose_next_)
   {
@@ -313,7 +315,7 @@ bool TrajectorySolver::CanFire(double tar_yaw, double tar_pitch, bool is_fast_fi
     }
     return is_fast_fire;
   }
-  if (angle_diff_exceeds)
+  if (pitch_error_exceeds)
   {
     return is_fast_fire;
   }
@@ -359,7 +361,7 @@ void TrajectorySolver::LocalSelectArmor(double time_delay)
       std::fabs(AngleDiff(SolveYaw(armor0.x, armor0.y), center_yaw_0));
   const double s_0 = armor0.x * armor0.x + armor0.y * armor0.y;
 
-  const double t1 = time_delay + 0.01 * std::fabs(target_.velocity.yaw);
+  const double t1 = time_delay + 0.018 * std::fabs(target_.velocity.yaw);
   const TarPostion center1 = PredictCenter(t1);
   const TarPostion armor1 = PredictArmor(1, center1);
   const double center_yaw_1 = SolveYaw(center1.x, center1.y);
@@ -552,9 +554,18 @@ void TrajectorySolver::UpdateSolveState(double& pitch, double& yaw, bool& is_fir
   // aim_x = pre_position_[0].x;
   // aim_y = pre_position_[0].y;
   // aim_z = pre_position_[0].z;
-
+  // if(target_.num!=3 || !target_.is_center){
+  //   aim_z -=0.03;
+  // }
+  if(target_.velocity.yaw > 4.0){
+    aim_z -= 0.10;
+  }
   pitch = SolvePitch(aim_x, aim_y, aim_z);
-
+  if(std::abs(target_.velocity.yaw) > 5.0){
+    fire_logic_mode_ = FireLogicMode::SPIN;
+  }else{
+    fire_logic_mode_ = FireLogicMode::COMMON;
+  }
   if (fire_logic_mode_ == FireLogicMode::SPIN)
   {
     yaw = SolveYaw(pre_center_.x, pre_center_.y);
@@ -562,7 +573,7 @@ void TrajectorySolver::UpdateSolveState(double& pitch, double& yaw, bool& is_fir
     const double aim_yaw = SolveYaw(aim_x, aim_y);
     is_fire = std::fabs(AngleDiff(aim_yaw, gimbal_yaw_)) <
               0.013;  // CanFire(gimbal_yaw_, pitch, false);
-    if (is_fire)
+    if (is_fire && std::abs(target_.velocity.yaw) < 8.0)
     {
       yaw = aim_yaw;
     }
@@ -570,7 +581,7 @@ void TrajectorySolver::UpdateSolveState(double& pitch, double& yaw, bool& is_fir
   else
   {
     yaw = SolveYaw(aim_x, aim_y);
-    is_fire = CanFire(yaw, pitch, true);
+    is_fire = CanFire(yaw, pitch, false);
   }
 
   last_pitch_ = pitch;
@@ -596,6 +607,13 @@ void TrajectorySolver::AutoSolveTrajectory(double& pitch, double& yaw, bool& is_
 
   fire_logic_mode_ = FireLogicMode::COMMON;
 
+  // 远距离旋转前哨站：只瞄底板，云台停止转动，等底板转到正前方再开火
+  // if (IsFarSpinningOutpost())
+  // {
+  //   SolveFarOutpostBottom(send_time, pitch, yaw, is_fire, aim_x, aim_y, aim_z, idx);
+  //   return;
+  // }
+
   // 上游若标记 is_center=false，说明给的就是装甲板的位置/速度
   // 直接走 CV 外推分支，跳过整车建模和择板
   if (!target_.is_center)
@@ -613,7 +631,7 @@ void TrajectorySolver::AutoSolveTrajectory(double& pitch, double& yaw, bool& is_
 
   double time_delay = fly_time_ + bias_time_ + send_time;
   AutoSelectArmor(time_delay);
-  RCLCPP_ERROR(logger_, " selected_idx_ = %d", selected_idx_);
+  // RCLCPP_ERROR(logger_, " selected_idx_ = %d", selected_idx_);
   PredictOneArmorPosition(time_delay, selected_idx_);
   // 更新fly_time_
   SolvePitch(pre_position_[selected_idx_].x, pre_position_[selected_idx_].y,

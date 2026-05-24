@@ -33,6 +33,7 @@ sys.path.append(
 
 
 def generate_launch_description():
+    from rosbag_record import get_rosbag_record_actions
     from common import (
         launch_params,
         get_tracker_component,
@@ -85,6 +86,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("robot_type", default_value="default"),
+            *get_rosbag_record_actions(bag_name_prefix="sim"),
             vision_container,
         ]
     )

@@ -470,6 +470,7 @@ void HikCameraNode::CaptureInit()
   SetEnumValue("PixelFormat", PixelType_Gvsp_BayerRG8);
   SetFloatValue("ExposureTime", params_.exposure_time);
   SetFloatValue("Gain", params_.gain);
+  ret = MV_CC_SetBoolValue(handle_, "GammaEnable", true);
   SetFloatValue("Gamma", params_.gamma);
 
   MVCC_ENUMVALUE adc_bit_depth{};

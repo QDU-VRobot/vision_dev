@@ -12,12 +12,13 @@
 
 #include "armor_detector/armor.hpp"
 #include "armor_detector/detector_base.hpp"
+#include "armor_detector/light_corner_corrector.hpp"
 
 #if ARMOR_DETECTOR_HAS_TENSORRT
 #include <NvInfer.h>
 #include <NvInferPlugin.h>
 #include <cuda_runtime.h>
-
+#include <cuda_profiler_api.h>
 #include "armor_detector/gpu_preprocessor.hpp"
 
 #elif ARMOR_DETECTOR_HAS_OPENVINO
@@ -46,8 +47,34 @@ class YoloDetector : public DetectorBase
     std::vector<std::string> ignore_classes;
     int detect_color;
     int num_keypoints = 4;
-    float large_armor_ratio_threshold = 3.2f;
     bool end_to_end = false;
+
+    // 合法性判别 + SMALL/LARGE 分型参数 (对齐传统路径 Detector::IsArmor):
+    //   1) 两灯条长度比 (短/长) > min_light_ratio
+    //   2) 中心距 / 平均灯条长 落在 [min_small, max_small) ∪ [min_large, max_large) 之一
+    //   3) 两灯条中心连线与水平方向夹角 < max_armor_angle
+    // 通过合法性判别后, 以 min_large_center_distance 作为 SMALL/LARGE 分界。
+    double min_light_ratio = 0.7;
+    double min_small_center_distance = 0.8;
+    double max_small_center_distance = 3.2;
+    double min_large_center_distance = 3.2;
+    double max_large_center_distance = 5.5;
+    double max_armor_angle = 35.0;
+
+    // 灯条二值化 + 颜色过滤 (对齐传统路径 Detector::PreprocessImage / FindLights):
+    //   在 YOLO 解析出关键点并构建灯条后, 用同一套灰度阈值再做一次二值化, 并基于
+    //   contour 的 R/B 像素和判定颜色, 用于过滤模型对不亮灯条的假阳性检测。
+    int binary_lower_thres = 160;
+    int binary_upper_thres = 255;
+
+    // 灯条角点校正 (对齐传统路径 Detector::CornerCorrectorParams):
+    //   在 PostProcessLights 完成验证后, 利用灰度图 + PCA 沿对称轴搜索亮度梯度,
+    //   把 YOLO 关键点细化到亚像素级灯条端点。
+    bool use_corner_corrector = false;
+    double cc_max_brightness = 25.0;
+    double cc_scale = 0.07;
+    double cc_start = 0.4;
+    double cc_end = 0.6;
   };
 
   static std::unique_ptr<YoloDetector> Create(rclcpp::Node& node);
@@ -81,7 +108,19 @@ class YoloDetector : public DetectorBase
   void RefreshLetterboxCache(int rows, int cols);
 #endif
   void SortKeypoints(std::vector<cv::Point2f>& keypoints);
+  // 装甲板合法性判别 + SMALL/LARGE 分型 (对齐传统路径 Detector::IsArmor)。
+  // 不合法时返回 ArmorType::INVALID, 调用方应在解析阶段直接 continue。
   ArmorType DetermineArmorType(const Light& light_1, const Light& light_2);
+
+  // YOLO 解析完成后的后处理:
+  //   1) 对原图灰度化 + 阈值二值化 (复用传统路径同名参数)
+  //   2) 对每个 armor 的两根灯条, 在二值化图上找最近 contour, 用 R/B 像素和重新
+  //      判定颜色; 任一灯条未点亮或颜色不匹配, 整个 armor 被丢弃
+  //   3) 用 contour 的 minAreaRect 回填 RotatedRect 基类与 width, 这样 width > 3
+  //      时 LightCornerCorrector::CorrectCorners 才会真正生效
+  //   4) 如启用 use_corner_corrector, 调用 LightCornerCorrector 对灯条端点做亚像素
+  //      级修正
+  void PostProcessLights(const cv::Mat& rgb_img);
 
   // 预计算的 per-class LUT, 避免每帧字符串比较 / map_label / std::find。
   // 由构造函数在配置完 ignore_classes 后一次性建立, 之后只读。
@@ -148,8 +187,8 @@ class YoloDetector : public DetectorBase
 
   std::unique_ptr<GpuPreprocessor> preprocessor_;
 
-  // cudaEvent_t ev_start_ = nullptr;
-  // cudaEvent_t ev_end_ = nullptr;
+  cudaEvent_t ev_start_ = nullptr;
+  cudaEvent_t ev_end_ = nullptr;
 
 #elif ARMOR_DETECTOR_HAS_OPENVINO
   ov::Core core_;
@@ -170,6 +209,11 @@ class YoloDetector : public DetectorBase
 #endif  // ARMOR_DETECTOR_HAS_OPENVINO / ARMOR_DETECTOR_HAS_TENSORRT
 
   std::vector<Armor> last_armors_;
+
+  // 灯条后处理状态: gray/binary 缓存以及可选的角点校正器
+  std::unique_ptr<LightCornerCorrector> light_corner_corrector_;
+  cv::Mat gray_img_;
+  cv::Mat binary_img_;
 };
 
 }  // namespace rm_auto_aim

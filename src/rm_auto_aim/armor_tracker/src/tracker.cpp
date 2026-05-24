@@ -996,9 +996,7 @@ void Tracker::UpdateOutpost(const Armors::SharedPtr& armors_msg)
                [this](const Armor& a)
                {
                  double pitch = OrientationToPitch(a.pose.orientation);
-                 std::cerr << "pitch: " << pitch << std::endl;
-                 // return std::abs(pitch - 15.0 * M_PI / 180.0) > ;
-                 return 1;
+                 return pitch < -0.01 ;
                });
 
   if (target_id_armors.empty())
@@ -1139,6 +1137,34 @@ void Tracker::HandleArmorJumpOutpost(const Armor& current_armor)
   else
   {
     outpost_idx_ = (outpost_idx_ + sign + 3) % 3;
+  }
+}
+
+// =====================================================================
+// 前哨站 outpost_idx 判定（跳变法 + 几何法结合）
+// =====================================================================
+void Tracker::UpdateOutpostIdx(const geometry_msgs::msg::Point& armor_pos, bool is_jump)
+{
+  const Eigen::VectorXd x = ekf_outpost_.GetState();
+  const int sign = (outpost_motion_ == OutpostMotion::LEARNING) ? (x(4) >= 0.0 ? 1 : -1)
+                                                                : outpost_v_yaw_sign_;
+
+  auto apply_jump_logic = [&]()
+  {
+    const double z_diff = last_tracked_armor_.pose.position.z - armor_pos.z;
+    if (sign * z_diff > params_.outpost_cast_threshold)
+    {
+      outpost_idx_ = (sign == 1) ? 0 : 2;
+    }
+    else
+    {
+      outpost_idx_ = (outpost_idx_ + sign + 3) % 3;
+    }
+  };
+
+  if (is_jump)
+  {
+    apply_jump_logic();
   }
 }
 

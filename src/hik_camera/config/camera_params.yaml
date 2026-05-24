@@ -8,8 +8,8 @@
     device_index_lob: 0
     frame_id: camera_optical_frame
     frame_id_lob: camera_optical_frame_lob
-    exposure_time: 2000.0
-    gain: 0.0
+    exposure_time: 15000.0
+    gain: 15.0
     autocap: true
     frame_rate_enable: false
     frame_rate: 249.0

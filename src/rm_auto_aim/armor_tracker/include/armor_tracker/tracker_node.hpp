@@ -10,6 +10,7 @@
 #include <Eigen/Dense>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <memory>
+#include <std_msgs/msg/bool.hpp>
 #include <string>
 
 #include "armor_tracker/tracker.hpp"
@@ -48,12 +49,14 @@ class ArmorTrackerNode : public rclcpp::Node
 
   // -------------------- 核心 --------------------
   std::unique_ptr<Tracker> tracker_;
+  auto_aim_interfaces::msg::Armors::SharedPtr last_armors_;
 
   // -------------------- TF / 订阅 --------------------
   std::shared_ptr<tf2_ros::Buffer> tf2_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf2_listener_;
   message_filters::Subscriber<auto_aim_interfaces::msg::Armors> armors_sub_;
   std::shared_ptr<armors_tf2_filter> armors_filter_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;
 
   // -------------------- 发布 --------------------
   rclcpp::Publisher<auto_aim_interfaces::msg::Target>::SharedPtr target_pub_;

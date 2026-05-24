@@ -254,3 +254,12 @@ trtexec --onnx=yolo11_fixed.onnx --saveEngine=yolo11.engine --fp16 --builderOpti
 ```
 
 可使用 `build_end2end`、`build_trt_engine` 脚本在 onnx 模型后插入 `EfficientNMS_TRT`，使其直接输出关键点、类别、置信度， 目前仅限 trt。
+
+
+当前配置：
+
+```bash
+python3 ./build_end2end.py --src yolo11_fixed.onnx --dst-onnx yolo11_end2end.onnx --num-classes 38 --num-kpts 4 --keep-topk 20 --score-thr 0.6 --iou-thr 0.3
+
+python3 ./build_trt_engine.py --onnx=yolo11_end2end.onnx --engine=yolo11_end2end.engine 
+```
